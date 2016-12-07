@@ -27,7 +27,7 @@
 /mon/mon_force_quorum_join true
 
 #osd
-/osd/osd_journal_size 100
+/osd/osd_journal_size 2000
 
 # these 2 should be passed at runtime to the container.
 #/osd/cluster_network 198.100.128.0/19

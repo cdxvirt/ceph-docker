@@ -35,7 +35,7 @@ function check_mon {
 
 function check_single_mon {
   # if MON has single_mon kubernetes label then enter single mode
-  if kubectl get node --show-labels --server=${K8S_IP}:${K8S_PORT} | grep -w "${K8S_IP}" | grep -w "single_mon=true" >/dev/null; then
+  if kubectl get node --show-labels --server=${K8S_IP}:${K8S_PORT} | grep -w "${K8S_IP}" | grep -w "cdxvirt/single_mon=true" >/dev/null; then
     ceph-mon -i ${MON_NAME} --extract-monmap /tmp/monmap
 
     # remove all monmap list then add itself
@@ -45,7 +45,7 @@ function check_single_mon {
     done
     monmaptool --add ${MON_NAME} ${MON_IP}:6789 /tmp/monmap
     ceph-mon -i ${MON_NAME} --inject-monmap /tmp/monmap
-    kubectl label node --server=${K8S_IP}:${K8S_PORT} ${K8S_IP} single_mon-
+    kubectl label node --server=${K8S_IP}:${K8S_PORT} ${K8S_IP} cdxvirt/single_mon-
     rm /tmp/monmap
   fi
 }
@@ -61,7 +61,7 @@ function mon_controller {
   etcdctl -C ${KV_IP}:${KV_PORT} set ${CLUSTER_PATH}/max_mons ${MAX_MONS} > /dev/null 2>&1
   etcdctl -C ${KV_IP}:${KV_PORT} mkdir ${CLUSTER_PATH}/mon_list > /dev/null 2>&1  || log_warn "mon_list already exists"
 
-  # if node have ceph_mon=true label, then add it into mon_list.
+  # if node have cdxvirt/ceph_mon=true label, then add it into mon_list.
   get_mon_label
   for node in ${nodes_have_mon_label}; do etcdctl -C ${KV_IP}:${KV_PORT} set ${CLUSTER_PATH}/mon_list/${node} ${node} >/dev/null 2>&1; log_success "Add ${node} to mon_list"; done
 
@@ -80,7 +80,7 @@ function check_mon_list {
   until [ $(current_mons) -ge "${MAX_MONS}" ] || [ -z "${nodes_without_mon_label}" ]; do
     local node_to_add=$(echo ${nodes_without_mon_label} | awk '{ print $1 }')
     etcdctl -C ${KV_IP}:${KV_PORT} set ${CLUSTER_PATH}/mon_list/${node_to_add} ${node_to_add} >/dev/null 2>&1
-    kubectl label node --server=${K8S_IP}:${K8S_PORT} ${K8S_CERT} ${node_to_add} ceph_mon=true --overwrite >/dev/null 2>&1 && log_success "Add ${node_to_add} to mon_list"
+    kubectl label node --server=${K8S_IP}:${K8S_PORT} ${K8S_CERT} ${node_to_add} cdxvirt/ceph_mon=true --overwrite >/dev/null 2>&1 && log_success "Add ${node_to_add} to mon_list"
     get_mon_label
   done
 }
@@ -90,8 +90,8 @@ function current_mons {
 }
 
 function get_mon_label {
-  nodes_have_mon_label=$(kubectl get node --show-labels --server=${K8S_IP}:${K8S_PORT} ${K8S_CERT} | awk '/Ready/ { print $1 " " $4 }' | awk '/ceph_mon=true/ { print $1 }')
-  nodes_without_mon_label=$(kubectl get node --show-labels --server=${K8S_IP}:${K8S_PORT} ${K8S_CERT} | awk '/Ready/ { print $1 " " $4 }' | awk '!/ceph_mon=true/ { print $1 }')
+  nodes_have_mon_label=$(kubectl get node --show-labels --server=${K8S_IP}:${K8S_PORT} ${K8S_CERT} | awk '/Ready/ { print $1 " " $4 }' | awk '/cdxvirt\/ceph_mon=true/ { print $1 }')
+  nodes_without_mon_label=$(kubectl get node --show-labels --server=${K8S_IP}:${K8S_PORT} ${K8S_CERT} | awk '/Ready/ { print $1 " " $4 }' | awk '!/cdxvirt\/ceph_mon=true/ { print $1 }')
 }
 
 function crush_initialization () {
@@ -288,6 +288,7 @@ function set_pg_num () {
 function osd_controller_env () {
   : ${CLUSTER_PATH:=ceph-config/${CLUSTER}}
   : ${OSD_INIT_MODE:=minimal}
+  : ${MAX_OSDS:=1}
   command -v docker > /dev/null 2>&1 || { echo "Command not found: docker"; exit 1; }
   DOCKER_CMD=$(command -v docker)
   DOCKER_VERSION=$($DOCKER_CMD -v | awk  /Docker\ version\ /'{print $3}')
@@ -304,8 +305,7 @@ function osd_controller_env () {
   chown ceph. ${OSD_FOLDER}
   if [ -n "${OSD_MEM}" ]; then OSD_MEM="-m ${OSD_MEM}"; fi
   if [ -n "${OSD_CPU_CORE}" ]; then OSD_CPU_CORE="-c ${OSD_CPU_CORE}"; fi
-  # if no max_osd_num_per_node key then create one
-  etcdctl mk ${CLUSTER_PATH}/max_osd_num_per_node 1 &>/dev/null || true
+  set_max_osd ${MAX_OSDS} init
 }
 
 function run_osds () {
@@ -512,13 +512,17 @@ function create_cont_name () {
 }
 
 function set_max_osd () {
-  if [ -z "$1" ]; then
-    local MAX_OSDS=1
+  if [ $# -eq "2" ] && [ $2 == "init" ]; then
+    local max_osd_num=$1
+    etcdctl mk ${CLUSTER_PATH}/max_osd_num_per_node ${max_osd_num} &>/dev/null || true
+    return 0
+  elif [ -z "$1" ]; then
+    local max_osd_num=1
   else
-    local MAX_OSDS=$1
+    local max_osd_num=$1
   fi
-  if etcdctl set ${CLUSTER_PATH}/max_osd_num_per_node ${MAX_OSDS}; then
-    log_success "Expect OSD number per node is ${MAX_OSDS}."
+  if etcdctl set ${CLUSTER_PATH}/max_osd_num_per_node ${max_osd_num}; then
+    log_success "Expect OSD number per node is ${max_osd_num}."
   else
     log_err "Fail to set max_osd_num_per_node"
     return 1
