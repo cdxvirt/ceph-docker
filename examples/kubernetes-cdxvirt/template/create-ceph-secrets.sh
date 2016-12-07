@@ -5,6 +5,7 @@ set -e
 : ${LABLE:="ceph-mon"}
 : ${SECRET_NAMESPACE:="default"}
 : ${OUTPUT:="ceph-secrets.yaml"}
+: ${CEPH_USER:="client.admin"}
 
 USAGE="Usage: -n [ceph_namespace] -l [ceph-mon-label] -s [secret_namespace] -f [output_filename]
 
@@ -34,7 +35,7 @@ USAGE="Usage: -n [ceph_namespace] -l [ceph-mon-label] -s [secret_namespace] -f [
   POD=$(${KUBECTL} --namespace=${NAMESPACE} get pod -l name=${LABLE} | awk 'NR==2{print$1}')
 
   if [ ! -z ${POD} ]; then
-    KEY=$($KUBECTL exec --namespace=${NAMESPACE} -it ${POD} grep key /etc/ceph/ceph.client.admin.keyring |awk '{printf "%s", $NF}'|base64)
+    KEY=$($KUBECTL exec --namespace=${NAMESPACE} ${POD} ceph auth print-key ${CEPH_USER} | base64)
 
     sed "s/\$SECRET_NAMESPACE/${SECRET_NAMESPACE}/g" ceph-secrets.yaml.template | sed "s/\$KEY/${KEY}/g" > ${OUTPUT}
     echo "Generate ${OUTPUT} done"

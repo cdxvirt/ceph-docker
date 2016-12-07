@@ -13,7 +13,7 @@ spec:
     spec:
       hostNetwork: true
       nodeSelector:
-        ceph_mon: "true"
+        cdxvirt/ceph_mon: "true"
       volumes:
         - name: cephconfig
           hostPath:

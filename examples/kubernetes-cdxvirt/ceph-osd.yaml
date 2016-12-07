@@ -11,7 +11,7 @@ spec:
     spec:
       hostNetwork: true
       nodeSelector:
-        ceph_osd: "true"
+        cdxvirt/ceph_osd: "true"
       volumes:
         - name: docker
           hostPath:
@@ -52,6 +52,10 @@ spec:
               value: "space"
             - name: "PGs_PER_OSD"
               value: "64"
+            - name: "OSD_INIT_MODE"
+              value: "minimal"
+            - name: "MAX_OSDS"
+              value: "1"
             - name: "KV_PORT"
               value: "2379"
             - name: "KV_TYPE"
