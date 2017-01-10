@@ -60,6 +60,15 @@ spec:
               value: "2379"
             - name: "KV_TYPE"
               value: "etcd"
+          livenessProbe:
+            failureThreshold: 3
+            initialDelaySeconds: 60
+            periodSeconds: 10
+            successThreshold: 1
+            exec:
+              command:
+              - /liveprobe.sh
+            timeoutSeconds: 5
           volumeMounts:
             - name: docker
               mountPath: /bin/docker

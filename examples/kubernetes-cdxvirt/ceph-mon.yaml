@@ -40,6 +40,14 @@ spec:
               value: "2379"
             - name: "NETWORK_AUTO_DETECT"
               value: "5"
+          livenessProbe:
+            failureThreshold: 3
+            initialDelaySeconds: 60
+            periodSeconds: 10
+            successThreshold: 1
+            tcpSocket:
+              port: 6789
+            timeoutSeconds: 5
           volumeMounts:
             - name: cephconfig
               mountPath: /var/lib/ceph
