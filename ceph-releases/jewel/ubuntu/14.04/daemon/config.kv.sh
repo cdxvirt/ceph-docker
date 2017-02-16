@@ -14,7 +14,7 @@ function check_KV_IP {
   fi
 
   # if K8S_IP can't connect to ETCD then search FLANNEL_NETWORK
-  local flannel_gw=$(route | awk '/default/ {print $2 }')
+  local flannel_gw=$(route -n | awk '/UG/ {print $2 }' | head -n 1)
   if curl http://${flannel_gw}:${KV_PORT} &>/dev/null; then
     KV_IP=${flannel_gw}
     return 0

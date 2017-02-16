@@ -1,5 +1,6 @@
 #!/bin/bash
 set -e
+set -x
 
 : ${NAMESPACE:="ceph"}
 : ${LABLE:="ceph-mon"}
@@ -39,6 +40,8 @@ USAGE="Usage: -n [ceph_namespace] -l [ceph-mon-label] -s [secret_namespace] -f [
 
     sed "s/\$SECRET_NAMESPACE/${SECRET_NAMESPACE}/g" ceph-secrets.yaml.template | sed "s/\$KEY/${KEY}/g" > ${OUTPUT}
     echo "Generate ${OUTPUT} done"
+    ${KUBECTL} create --namespace=${SECRET_NAMESPACE} -f ${OUTPUT}
+
   else
     echo "Pod ceph-mon not found"
   fi

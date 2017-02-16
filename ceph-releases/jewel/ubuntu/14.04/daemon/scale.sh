@@ -26,16 +26,36 @@ function err_status() { log "$1" "ERROR & WAIT" "${LOG_ERROR_COLOR}"; echo "$1" 
 function success_status() { echo "$1" >/status; }
 function log_warn() { log "$1" "WARN" "${LOG_WARN_COLOR}"; }
 
+function ceph_api () {
+  case $1 in
+    start_all_osds|set_max_osd|get_max_osd|stop_all_osds|stop_all_osds|get_active_osd_nums|run_osds)
+      osd_controller_env
+      $@
+      ;;
+    set_max_mon|get_max_mon|remove_mon)
+      mon_controller_env
+      $@
+      ;;
+    get_osd_map)
+      $@
+      ;;
+    *)
+      log_warn "Usahe: "
+      ;;
+  esac
+}
+
 function check_mon {
   CLUSTER_PATH=ceph-config/${CLUSTER}
   : ${K8S_IP:=${KV_IP}}
   : ${K8S_PORT:=8080}
+  : ${MON_RECOVERY_LABEL:="cdxvirt/recovery"}
   check_single_mon
 }
 
 function check_single_mon {
   # if MON has single_mon kubernetes label then enter single mode
-  if kubectl get node --show-labels --server=${K8S_IP}:${K8S_PORT} | grep -w "${K8S_IP}" | grep -w "cdxvirt/single_mon=true" >/dev/null; then
+  if kubectl get node --show-labels --server=${K8S_IP}:${K8S_PORT} | grep -w "${K8S_IP}" | grep -w "${MON_RECOVERY_LABEL}=true" >/dev/null; then
     ceph-mon -i ${MON_NAME} --extract-monmap /tmp/monmap
 
     # remove all monmap list then add itself
@@ -45,53 +65,215 @@ function check_single_mon {
     done
     monmaptool --add ${MON_NAME} ${MON_IP}:6789 /tmp/monmap
     ceph-mon -i ${MON_NAME} --inject-monmap /tmp/monmap
-    kubectl label node --server=${K8S_IP}:${K8S_PORT} ${K8S_IP} cdxvirt/single_mon-
+    kubectl label node --server=${K8S_IP}:${K8S_PORT} ${K8S_IP} ${MON_RECOVERY_LABEL}-
     rm /tmp/monmap
   fi
 }
 
-function mon_controller {
+function mon_controller_env () {
   CLUSTER_PATH=ceph-config/${CLUSTER}
-  : ${MAX_MONS:=3}
   : ${K8S_IP:=https://${KUBERNETES_SERVICE_HOST}}
   : ${K8S_PORT:=${KUBERNETES_SERVICE_PORT}}
   : ${K8S_CERT:="--certificate-authority=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt --token=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)"}
+  : ${NAMESPACE:=ceph}
+  : ${POD_SELECTOR:="ceph-mon"}
+  : ${EP_NAME:="ceph-mon"}
+  : ${MON_LABEL:="cdxvirt/ceph_mon"}
+}
 
-  etcdctl -C ${KV_IP}:${KV_PORT} mkdir ${CLUSTER_PATH} > /dev/null 2>&1 || log_warn "CLUSTER_PATH already exists"
-  etcdctl -C ${KV_IP}:${KV_PORT} set ${CLUSTER_PATH}/max_mons ${MAX_MONS} > /dev/null 2>&1
-  etcdctl -C ${KV_IP}:${KV_PORT} mkdir ${CLUSTER_PATH}/mon_list > /dev/null 2>&1  || log_warn "mon_list already exists"
+function mon_controller () {
+  mon_controller_env
+  # making sure the root dirs are present
+  : ${MAX_MONS:=3}
+  etcdctl -C ${KV_IP}:${KV_PORT} mkdir ${CLUSTER_PATH} > /dev/null 2>&1 || true
+  etcdctl -C ${KV_IP}:${KV_PORT} mkdir ${CLUSTER_PATH}/mon_host > /dev/null 2>&1  || true
+  set_max_mon ${MAX_MONS} init
 
-  # if node have cdxvirt/ceph_mon=true label, then add it into mon_list.
-  get_mon_label
-  for node in ${nodes_have_mon_label}; do etcdctl -C ${KV_IP}:${KV_PORT} set ${CLUSTER_PATH}/mon_list/${node} ${node} >/dev/null 2>&1; log_success "Add ${node} to mon_list"; done
+  # if svc & ep is running, than set mon_host
+  if kubectl get ep ${EP_NAME} --server=${K8S_IP}:${K8S_PORT} ${K8S_CERT} --namespace=${NAMESPACE} &>/dev/null; then
+    etcdctl -C ${KV_IP}:${KV_PORT} set ${CLUSTER_PATH}/global/mon_host ${EP_NAME}.${NAMESPACE}
+  fi
 
   while [ true ]; do
-    get_mon_label
-    check_mon_list
+    mon_controller_main
     sleep 60
   done
 }
 
-function check_mon_list {
-  if [ "${MAX_MONS}" -eq "0" ]; then
-    return 0
+function mon_controller_main () {
+  # get $MAX_MONS & check it matching positive number
+  re="^[1-9][0-9]*$"
+  if MAX_MONS=$(etcdctl -C ${KV_IP}:${KV_PORT} get ${CLUSTER_PATH}/max_mons); then
+    if ! [[ "${MAX_MONS}" =~ $re ]]; then
+      log_err "MAX_MONS type error: ${MAX_MONS}"
+      return 0
+    fi
+  else
+    log_err "Can't read max_mons"
   fi
 
-  until [ $(current_mons) -ge "${MAX_MONS}" ] || [ -z "${nodes_without_mon_label}" ]; do
-    local node_to_add=$(echo ${nodes_without_mon_label} | awk '{ print $1 }')
-    etcdctl -C ${KV_IP}:${KV_PORT} set ${CLUSTER_PATH}/mon_list/${node_to_add} ${node_to_add} >/dev/null 2>&1
-    kubectl label node --server=${K8S_IP}:${K8S_PORT} ${K8S_CERT} ${node_to_add} cdxvirt/ceph_mon=true --overwrite >/dev/null 2>&1 && log_success "Add ${node_to_add} to mon_list"
-    get_mon_label
+  get_mon_nodes
+
+  # how many mons needs to add?
+  current_mons=$(echo ${nodes_have_mon_label} | wc -w)
+  if [ ${current_mons} -lt "${MAX_MONS}" ]; then
+    local mon_num2add=$(expr ${MAX_MONS} - ${current_mons})
+  elif [ ${current_mons} -gt "${MAX_MONS}" ]; then
+    local mon_num2add="-1"
+  else
+    local mon_num2add=0
+  fi
+
+  # create kubernetes mon label
+  local counter=0
+  if [ ${mon_num2add} == "-1" ]; then
+    auto_remove_mon
+  else
+    local counter=0
+    for mon2add in ${nodes_no_mon_label}; do
+      if [ "${counter}" -lt ${mon_num2add} ]; then
+        kubectl label node --server=${K8S_IP}:${K8S_PORT} ${K8S_CERT} ${mon2add} \
+          ${MON_LABEL}=true --overwrite &>/dev/null && log_success "Add Mon node \"${mon2add}\""
+        let counter=counter+1
+      fi
+    done
+  fi
+
+  # update endpoints
+  if kubectl get ep ${EP_NAME} --server=${K8S_IP}:${K8S_PORT} ${K8S_CERT} --namespace=${NAMESPACE} &>/dev/null; then
+    update_ceph_mon_ep
+  fi
+}
+
+function get_mon_nodes () {
+  nodes_have_mon_label=$(kubectl get node --show-labels --server=${K8S_IP}:${K8S_PORT} ${K8S_CERT} \
+    |  grep -w "${MON_LABEL}" | awk '/Ready/ { print $1 }')
+  nodes_no_mon_label=$(kubectl get node --show-labels --server=${K8S_IP}:${K8S_PORT} ${K8S_CERT} \
+    |  grep -wv "${MON_LABEL}" | awk '/Ready/ { print $1 }')
+  etcd_mon_host=$(etcdctl -C ${KV_IP}:${KV_PORT} ls ${CLUSTER_PATH}/mon_host | sed "s#.*/mon_host/##")
+}
+
+function update_ceph_mon_ep () {
+  local ep_list=""
+  for mon_name in $(echo ${etcd_mon_host}); do
+    local mon_ip=$(mon_name_2_mon_ip ${mon_name})
+    # josn form needs ","
+    if [ -z "${mon_ip}" ]; then
+      log_warn "Can't get mon_ip from ${mon_name}"
+    elif [ -z "${ep_list}" ]; then
+      local mon_ip_ep_format="{\"ip\": \"${mon_ip}\"}"
+      ep_list=${mon_ip_ep_format}
+    else
+      local mon_ip_ep_format="{\"ip\": \"${mon_ip}\"}"
+      ep_list="${ep_list}, ${mon_ip_ep_format}"
+    fi
+  done
+
+  # make sure ep_list is not null
+  if [ -n "${ep_list}" ]; then
+    local UPDATE_EP="kubectl --server=${K8S_IP}:${K8S_PORT} ${K8S_CERT} \
+       --namespace=${NAMESPACE} patch ep ${EP_NAME} -p \
+      '{\"subsets\": [{\"addresses\": [${ep_list}],\"ports\": [{\"port\": 6789,\"protocol\": \"TCP\"}]}]}'"
+    eval $UPDATE_EP >/dev/null
+  fi
+}
+
+function node_ip_2_pod_name () {
+  if [ -z $1 ]; then
+    log_err "Usage: node_ip_2_pod_name kubernetes_IP"
+    exit 1
+  fi
+  kubectl get pod -o wide --namespace=${NAMESPACE} -l name=${POD_SELECTOR} | grep -w "$1" | awk '{ print $1 }'
+}
+
+function node_ip_2_hostname () {
+  if [ -z $1 ]; then
+    log_err "Usage: node_ip_2_hostname kubernetes_IP"
+    exit 1
+  fi
+  local pod_name=$(node_ip_2_pod_name $1)
+  kubectl exec --namespace=${NAMESPACE} ${pod_name} hostname 2>/dev/null
+}
+
+function mon_name_2_mon_ip () {
+  if [ -z $1 ]; then
+    log_err "Usage: mon_name_2_mon_ip mon_name"
+    exit 1
+  fi
+  etcdctl -C ${KV_IP}:${KV_PORT} get ${CLUSTER_PATH}/mon_host/$1 2>/dev/null | sed 's/:6789//'
+}
+
+function remove_mon () {
+  if [ -z $1 ]; then
+    log_err "Usage: remove_mon MON_name"
+    exit 1
+  fi
+  start_config
+  get_mon_nodes
+  if [ $(echo ${etcd_mon_host} | wc -w) -le $(get_max_mon) ]; then
+    log_warn "Running Mon pods equals MAX_MONS. Do nothing."
+    return 0
+  fi
+  for mon_node in ${nodes_have_mon_label}; do
+    local mon_name=$(node_ip_2_hostname ${mon_node})
+    if [ "$1" == "${mon_name}" ]; then
+      etcdctl -C ${KV_IP}:${KV_PORT} rm ${CLUSTER_PATH}/mon_host/${mon_name} &>/dev/null || true
+      kubectl label node --server=${K8S_IP}:${K8S_PORT} ${K8S_CERT} ${mon_node} \
+        ${MON_LABEL}- &>/dev/null
+      ceph mon remove "${mon_name}" || true
+    fi
+  done
+  until confd -onetime -backend ${KV_TYPE} -node ${CONFD_NODE_SCHEMA}${KV_IP}:${KV_PORT} ${CONFD_KV_TLS} -prefix="/${CLUSTER_PATH}/" ; do
+    echo "Waiting for confd to update templates..."
+    sleep 1
   done
 }
 
-function current_mons {
-  etcdctl -C ${KV_IP}:${KV_PORT} ls ${CLUSTER_PATH}/mon_list | wc -l
+function auto_remove_mon () {
+  start_config
+
+  # get the last mon quorum index
+  local mon_count=$(ceph quorum_status | jq .quorum | sed '1d;$d' | wc -w)
+  local mon_quorum_json_index=$(expr ${mon_count} - 1)
+  local mon_name2remove=$(ceph quorum_status | jq .quorum_names[${mon_quorum_json_index}] | tr -d "\"")
+  if [ -z ${mon_name2remove} ]; then
+    log_err "Monitor name not found"
+    return 0
+  elif [ "${mon_count}" -le 2 ]; then
+    log_warn "Monitor number is too low. (Only \"${mon_count}\" monitor)"
+    return 0
+  else
+    remove_mon ${mon_name2remove}
+  fi
 }
 
-function get_mon_label {
-  nodes_have_mon_label=$(kubectl get node --show-labels --server=${K8S_IP}:${K8S_PORT} ${K8S_CERT} | awk '/Ready/ { print $1 " " $4 }' | awk '/cdxvirt\/ceph_mon=true/ { print $1 }')
-  nodes_without_mon_label=$(kubectl get node --show-labels --server=${K8S_IP}:${K8S_PORT} ${K8S_CERT} | awk '/Ready/ { print $1 " " $4 }' | awk '!/cdxvirt\/ceph_mon=true/ { print $1 }')
+function set_max_mon () {
+  if [ $# -eq "2" ] && [ $2 == "init" ]; then
+    local max_mon_num=$1
+    etcdctl -C ${KV_IP}:${KV_PORT} mk ${CLUSTER_PATH}/max_mons ${max_mon_num} &>/dev/null || true
+    return 0
+  elif [ -z "$1" ]; then
+    log_err "Usage: set_max_mon 1~5+"
+    exit 1
+  else
+    local max_mon_num=$1
+  fi
+  if etcdctl -C ${KV_IP}:${KV_PORT} set ${CLUSTER_PATH}/max_mons ${max_mon_num}; then
+    log_success "Expect MON number is \"$1\"."
+  else
+    log_err "Fail to set \$MAX_MONS"
+    return 1
+  fi
+}
+
+function get_max_mon () {
+  local MAX_MONS=""
+  if MAX_MONS=$(etcdctl -C ${KV_IP}:${KV_PORT} get ${CLUSTER_PATH}/max_mons); then
+    echo "${MAX_MONS}"
+  else
+    log_err "Fail to get \$MAX_MONS"
+    return 1
+  fi
 }
 
 function crush_initialization () {
@@ -103,6 +285,11 @@ function crush_initialization () {
   # Default crush leaf [ osd | host ] & replication size 1 ~ 9
   : ${DEFAULT_CRUSH_LEAF:=osd}
   : ${DEFAULT_POOL_COPIES:=1}
+
+  # check ceph command is usable
+  until timeout 10 ceph health &>/dev/null; do
+    log_warn "Waitiing for ceph cluster is ready."
+  done
 
   # set lock to avoid multiple node writting together
   until etcdctl -C ${KV_IP}:${KV_PORT} mk ${CLUSTER_PATH}/osd_init_lock ${HOSTNAME} > /dev/null 2>&1; do
@@ -292,10 +479,8 @@ function osd_controller_env () {
   command -v docker > /dev/null 2>&1 || { echo "Command not found: docker"; exit 1; }
   DOCKER_CMD=$(command -v docker)
   DOCKER_VERSION=$($DOCKER_CMD -v | awk  /Docker\ version\ /'{print $3}')
-  # show docker version and check docker libraries load status
-  if [[ -n "${DOCKER_VERSION}" ]]; then
-    log_info "docker version ${DOCKER_VERSION}"
-  else
+  # check docker version
+  if ! [[ -n "${DOCKER_VERSION}" ]]; then
     $DOCKER_CMD -v
     exit 1
   fi
@@ -461,11 +646,11 @@ function calc_osd2add () {
 }
 
 function select_n_disks () {
-  local COUNTER=0
+  local counter=0
   for disk in $1; do
-    if [ "${COUNTER}" -lt "$2" ]; then
+    if [ "${counter}" -lt "$2" ]; then
       osd_add_list="${osd_add_list} ${disk}"
-      let COUNTER=COUNTER+1
+      let counter=counter+1
     fi
   done
 }
@@ -531,7 +716,7 @@ function set_max_osd () {
 
 function get_max_osd {
   local MAX_OSDS=""
-  if MAX_OSDS=$(etcdctl get ${CLUSTER_PATH}/max_osd_num_per_node ${MAX_OSDS}); then
+  if MAX_OSDS=$(etcdctl get ${CLUSTER_PATH}/max_osd_num_per_node); then
     echo "${MAX_OSDS}"
   else
     log_err "Fail to get max_osd_num_per_node"
@@ -539,16 +724,83 @@ function get_max_osd {
   fi
 }
 
+function get_slot_mapping {
+  if [ -z $1 ]; then
+    return 0
+  fi
+  printf '%s\n' "$avail_devs" | while IFS= read -r line
+  do
+    echo $"$line"
+  done | grep -w ^$1 | awk '{print $2}'
+}
+
+function get_dev_osdid {
+  if [ -z $1 ]; then
+    return 0
+  fi
+  local osd_cont_id=$(docker ps -q -f LABEL=CEPH=osd -f LABEL=DEV_NAME="/dev/$1")
+  if [ ! -z ${osd_cont_id} ]; then
+    local osd_id=$(docker inspect --format='{{.Config.Labels.OSD_ID}}' "${osd_cont_id}" 2>/dev/null)
+  else
+    echo ""
+    return 0
+  fi
+  re="^[0-9]+([.][0-9]+)?$"
+  if [[ ${osd_id} =~ $re ]]; then
+    echo ${osd_id}
+  fi
+}
+
+function get_dev_serial {
+  if [ -z $1 ]; then
+    return 0
+  fi
+  local dev_model=$(hdparm -I /dev/$1 2>/dev/null | awk '/Model Number/ {print $3}')
+  local dev_serial=$(hdparm -I /dev/$1 2>/dev/null | awk '/Serial Number/ {print $3}')
+  if [ -z ${dev_serial} ]; then
+    echo ${dev_model}
+  else
+    echo ${dev_model}_${dev_serial}
+  fi
+}
+
+function get_osd_map {
+  MAPPING_COMMAND="/opt/bin/mapping.sh"
+  command -v ${MAPPING_COMMAND} &>/dev/null || { echo "Command not found: \"${MAPPING_COMMAND}\"";exit 1; }
+  slot_list=$(${MAPPING_COMMAND} --list-all-slots)
+  avail_devs=$(${MAPPING_COMMAND} --list-all-disk-mappings)
+
+  # create json output
+  # begin
+  osd_map_json='{"node":['
+
+  local counter=1
+  local entries=$(echo $slot_list | wc -w)
+  for slot in ${slot_list}; do
+    dev_name=$(get_slot_mapping ${slot})
+    osd_id=$(get_dev_osdid ${dev_name})
+    disk_serial=$(get_dev_serial ${dev_name})
+    osd_map_json=${osd_map_json}'{"slot":"'$slot'","dev_name":"'${dev_name}'","osd_id":"'${osd_id}'","disk_serial":"'${disk_serial}'"}'
+    # add comma
+    if [ ${counter} -lt ${entries} ]; then
+      osd_map_json=${osd_map_json}','
+    fi
+    let counter=counter+1
+  done
+  osd_map_json=${osd_map_json}']}'
+  echo ${osd_map_json}
+}
+
 function get_active_osd_nums () {
-  ${DOCKER_CMD} ps -fq LABEL=CEPH=osd | wc -l
+  ${DOCKER_CMD} ps -q -f LABEL=CEPH=osd | wc -l
 }
 
 function stop_all_osds () {
-  ${DOCKER_CMD} stop $(${DOCKER_CMD} ps -fq LABEL=CEPH=osd)
+  ${DOCKER_CMD} stop $(${DOCKER_CMD} ps -q -f LABEL=CEPH=osd)
 }
 
 function restart_all_osds () {
-  ${DOCKER_CMD} restart $(${DOCKER_CMD} ps -fq LABEL=CEPH=osd)
+  ${DOCKER_CMD} restart $(${DOCKER_CMD} ps -q -f LABEL=CEPH=osd)
 }
 
 function is_osd_running () {
@@ -703,3 +955,18 @@ function clear_raid_disks () {
   done
 }
 
+function docker(){
+  local ARGS=""
+  for ARG in "$@"; do
+    if [[ -n "$(echo "${ARG}" | grep '{.*}' | jq . 2>/dev/null)" ]]; then
+      ARGS="${ARGS} \"$(echo ${ARG} | jq -c . | sed "s/\"/\\\\\"/g")\""
+    elif [[ "$(echo "${ARG}" | wc -l)" -gt "1" ]]; then
+      ARGS="${ARGS} \"$(echo "${ARG}" | sed "s/\"/\\\\\"/g")\""
+    else
+      ARGS="${ARGS} ${ARG}"
+    fi
+  done
+  [[ "${DEBUG}" == "true" ]] && set -x
+
+  bash -c "LD_LIBRARY_PATH=/lib:/host/lib $(which docker) ${ARGS}"
+}

@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Endpoints
+metadata:
+  name: ceph-mon
+  namespace: ceph
+  labels:
+    name: ceph-mon
+subsets:
+- addresses:
+  - ip: 192.168.32.1
+  ports:
+  - port: 6789
+    protocol: TCP

@@ -280,6 +280,8 @@ function start_mon {
 
     # Clean up the temporary key
     rm /tmp/${CLUSTER}.mon.keyring
+  else
+    ceph-mon -i ${MON_NAME} --inject-monmap /etc/ceph/monmap-${CLUSTER}
   fi
 
   # start MON
@@ -1030,6 +1032,7 @@ if [ ${DEBUG_MODE} == "true" ]; then
     set -x
 fi
 source /scale.sh
+echo -e "search ceph.svc.cluster.local svc.cluster.local cluster.local\nnameserver 10.0.0.10\noptions ndots:5" > /etc/resolv.conf
 if [ ${KV_TYPE} == "etcd" ]; then
     check_KV_IP
 fi
@@ -1100,10 +1103,9 @@ case "$CEPH_DAEMON" in
   mon_controller)
     mon_controller
     ;;
-  osd_ctrl)
-    osd_controller_env
+  ceph-api)
     shift
-    $@
+    ceph_api $@
     ;;
   snapshot)
     rbd_snapshot

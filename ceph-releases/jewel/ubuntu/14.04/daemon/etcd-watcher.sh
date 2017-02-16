@@ -12,7 +12,7 @@ else
   max_osd_num=$ETCD_WATCH_VALUE
   echo "max_osd_num: $max_osd_num"
 
-  /entrypoint.sh osd_ctrl run_osds
+  ceph-api run_osds
 fi
 
 
