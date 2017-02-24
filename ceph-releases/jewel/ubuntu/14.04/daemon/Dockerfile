@@ -4,7 +4,7 @@
 #
 # VERSION 0.0.1
 
-FROM cdxvirt/ceph-base:10.2.5-1
+FROM cdxvirt/ceph-base:base-10.2.5-2
 MAINTAINER Sébastien Han "seb@redhat.com"
 
 # Add templates for confd

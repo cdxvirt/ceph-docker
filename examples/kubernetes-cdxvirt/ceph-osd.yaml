@@ -33,7 +33,7 @@ spec:
             path: /etc/localtime
       containers:
         - name: ceph-osd-pod
-          image: cdxvirt/ceph-daemon:latest
+          image: cdxvirt/ceph-daemon:daemon-10.2.5-1
           securityContext:
             privileged: true
           args: ["osd_controller"]
