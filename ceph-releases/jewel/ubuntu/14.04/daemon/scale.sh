@@ -313,10 +313,10 @@ function crush_initialization () {
     # crush_ruleset 0 for host, 1 for osd
     case "${DEFAULT_CRUSH_LEAF}" in
       host)
-        ceph ${CEPH_OPTS} osd pool set ${DEFAULT_POOL} crush_ruleset 0
+        set_crush_ruleset ${DEFAULT_POOL} 0
         ;;
       osd)
-        ceph ${CEPH_OPTS} osd pool set ${DEFAULT_POOL} crush_ruleset 1
+        set_crush_ruleset ${DEFAULT_POOL} 1
         ;;
       *)
         log_warn "DEFAULT_CRUSH_LEAF not in [ osd | host ], do nothing"
@@ -402,9 +402,9 @@ function crush_type_space () {
     log_warn "No Storage Node, do nothing with changing crush_type"
     return 0
   elif [ ${NODEs} -eq "1" ]; then
-    ceph ${CEPH_OPTS} osd pool set ${DEFAULT_POOL} size 1
+    set_pool_size ${DEFAULT_POOL} 1
   else
-    ceph ${CEPH_OPTS} osd pool set ${DEFAULT_POOL} size 2
+    set_pool_size ${DEFAULT_POOL} 2
   fi
 
   # multiple = OSDs / 2, pg_num = PGs_PER_OSD x multiple
@@ -425,9 +425,9 @@ function crush_type_safety () {
     log_warn "No Storage Node, do nothing with changing crush_type"
     return 0
   elif [ ${NODEs} -lt "3" ]; then
-    ceph ${CEPH_OPTS} osd pool set ${DEFAULT_POOL} size ${NODEs}
+    set_pool_size ${DEFAULT_POOL} ${NODEs}
   else
-    ceph ${CEPH_OPTS} osd pool set ${DEFAULT_POOL} size 3
+    set_pool_size ${DEFAULT_POOL} 3
   fi
 
   # multiple = OSDs / 3, pg_num = PGs_PER_OSD x multiple
@@ -445,24 +445,43 @@ function crush_type_safety () {
 function auto_change_crush_leaf () {
   # crush_ruleset 0 for host, 1 for osd
   if [ ${NODEs} -ge $1 ]; then
-    ceph ${CEPH_OPTS} osd pool set ${DEFAULT_POOL} crush_ruleset 0
+    set_crush_ruleset ${DEFAULT_POOL} 0
   else
-    ceph ${CEPH_OPTS} osd pool set ${DEFAULT_POOL} crush_ruleset 1
+    set_crush_ruleset ${DEFAULT_POOL} 1
+  fi
+}
+
+function set_crush_ruleset () {
+  # $1 = pool_name $2 = crush_ruleset
+  log "Set pool \"$1\" crush_ruleset to \"$2\""
+  if ! ceph ${CEPH_OPTS} osd pool set $1 crush_ruleset $2 2>/dev/null; then
+    log_warn "Fail to set crush_ruleset of $1 pool"
+    return 0
+  fi
+}
+
+function set_pool_size () {
+  # $1 = pool_name $2 = pool_size
+  log "Set pool \"$1\" replications to \"$2\""
+  if ! ceph ${CEPH_OPTS} osd pool set $1 size $2 2>/dev/null; then
+    log_warn "Fail to set replications of $1 pool"
+    return 0
   fi
 }
 
 function set_pg_num () {
   # $1 = pool_name, $2 = pg_num
-   if ! ceph ${CEPH_OPTS} osd pool set $1 pg_num $2; then
-     log_warn "Fail to Set pg_num of $1 pool"
-     return 0
-   fi
+  log "Set pool \"$1\" pg_num to \"$2\""
+  if ! ceph ${CEPH_OPTS} osd pool set $1 pg_num $2 2>/dev/null; then
+    log_warn "Fail to set pg_num of $1 pool"
+    return 0
+  fi
 
   # wait for pg_num resized and change pgp_num
   until [ $(ceph ${CEPH_OPTS} -s | grep creating -c) -eq 0 ]; do
     sleep 5
   done
-  if ! ceph ${CEPH_OPTS} osd pool set $1 pgp_num $2; then
+  if ! ceph ${CEPH_OPTS} osd pool set $1 pgp_num $2 2>/dev/null; then
     log_warn "Fail to Set pgp_num of $1 pool"
     return 0
   fi
