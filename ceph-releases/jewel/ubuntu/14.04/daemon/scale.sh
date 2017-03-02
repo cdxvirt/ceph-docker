@@ -756,6 +756,18 @@ function get_dev_osdid {
 function get_dev_model {
   if [ -z $1 ]; then
     return 0
+  elif [ $(readlink -f /sys/class/block/$1| grep '/ata[0-9]*/') ]; then
+    local ATA_PORT="$(readlink -f "/sys/class/block/$1" | sed -n "s/.*ata\([0-9]\{1,3\}\)\/host.*/\1/p")"
+    local ID_FILE="/sys/class/ata_device/dev$ATA_PORT.0/id"
+    local count="0"
+    echo -n "0x"
+    for i in `/bin/cat $ID_FILE`; do
+        count=$(($count+1))
+        if [ $count -gt 27 ] && [ $count -le 47 ];then
+                echo -n `echo $i |/usr/bin/cut -c1-2`
+                echo -n `echo $i |/usr/bin/cut -c3-4`
+       fi
+    done
   elif [ -f "/sys/class/block/$1/device/model" ]; then
     local dev_model=$(od -An -t x1 /sys/block/$1/device/model 2>/dev/null)
     declare -a a_model
@@ -778,10 +790,22 @@ function get_dev_model {
 function get_dev_serial {
   if [ -z $1 ]; then
     return 0
+  elif [ $(readlink -f /sys/class/block/$1| grep '/ata[0-9]*/') ]; then
+    local ATA_PORT="$(readlink -f "/sys/class/block/$1" | sed -n "s/.*ata\([0-9]\{1,3\}\)\/host.*/\1/p")"
+    local ID_FILE="/sys/class/ata_device/dev$ATA_PORT.0/id"
+    local count="0"
+    echo -n "0x"
+    for i in `/bin/cat $ID_FILE`; do
+        count=$(($count+1))
+        if [ $count -gt 10 ] && [ $count -le 20 ];then
+        	echo -n `echo $i |/usr/bin/cut -c1-2`
+          	echo -n `echo $i |/usr/bin/cut -c3-4`
+       fi
+    done
   elif [ -f "/sys/class/block/$1/device/vpd_pg80" ]; then
     pg80=$(od -An -t x1 /sys/block/$1/device/vpd_pg80)
     declare -a a_pg80
-    count="0"
+    local count="0"
     for i in $pg80; do
        a_pg80[$count]=$(echo $i)
        count=$(($count+1))
@@ -806,6 +830,18 @@ function get_dev_serial {
 function get_dev_fwrev {
   if [ -z $1 ]; then
     return 0
+  elif [ $(readlink -f /sys/class/block/$1| grep '/ata[0-9]*/') ]; then
+    local ATA_PORT="$(readlink -f "/sys/class/block/$1" | sed -n "s/.*ata\([0-9]\{1,3\}\)\/host.*/\1/p")"
+    local ID_FILE="/sys/class/ata_device/dev$ATA_PORT.0/id"
+    local count="0"
+    echo -n "0x"
+    for i in `/bin/cat $ID_FILE`; do
+        count=$(($count+1))
+        if [ $count -gt 23 ] && [ $count -le 27 ];then
+                echo -n `echo $i |/usr/bin/cut -c1-2`
+                echo -n `echo $i |/usr/bin/cut -c3-4`
+       fi
+    done
   elif [ -f "/sys/class/block/$1/device/rev" ]; then
     local dev_fwrev=$(od -An -t x1 /sys/block/$1/device/rev 2>/dev/null)
     declare -a a_rev
