@@ -965,7 +965,7 @@ function is_osd_correct() {
   fi
 
   disk2verify="${disk2verify}1"
-  if ceph-disk --setuser ceph --setgroup disk activate ${disk2verify} &>/dev/null; then
+  if ceph-disk --setuser ceph --setgroup disk activate ${disk2verify} --no-start-daemon &>/dev/null; then
     OSD_ID=$(df | grep "${disk2verify}" | sed "s/.*${CLUSTER}-//g")
     umount ${disk2verify}
     return 0
