@@ -15,7 +15,7 @@ spec:
             path: /etc/localtime
       containers:
         - name: mon-controller-pod
-          image: cdxvirt/ceph-daemon:latest
+          image: cdxvirt/ceph-daemon:daemon-10.2.5-2
           args: ["mon_controller"]
           env:
             - name: "CEPH_PUBLIC_NETWORK"

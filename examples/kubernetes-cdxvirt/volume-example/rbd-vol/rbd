@@ -2,7 +2,7 @@
 
 command -v docker > /dev/null 2>&1 || { echo "Command not found: docker"; exit 1; }
 DOCKER_CMD=$(command -v docker)
-CEPH_IMG="cdxvirt/ceph-daemon:k8s-1.5"
+CEPH_IMG="cdxvirt/ceph-daemon:daemon-10.2.5-2"
 
 LD_LIBRARY_PATH=/lib:/host/lib ${DOCKER_CMD} run --rm --privileged=true --net=host --pid=host \
 -v /dev/:/dev/ -v /etc/ceph:/etc/ceph -v /lib/modules/:/lib/modules/ \
