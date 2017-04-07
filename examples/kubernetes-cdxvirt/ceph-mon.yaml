@@ -23,7 +23,7 @@ spec:
             path: /etc/localtime
       containers:
         - name: ceph-mon-pod
-          image: cdxvirt/ceph-daemon:latest
+          image: cdxvirt/ceph-daemon:daemon-10.2.5-3
           imagePullPolicy: IfNotPresent
           args: ["mon"]
           env:
