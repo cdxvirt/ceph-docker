@@ -18,7 +18,7 @@ spec:
             path: /etc/localtime
       containers:
         - name: ceph-fs-pod
-          image: cdxvirt/ceph-daemon:latest
+          image: cdxvirt/ceph-daemon:daemon-10.2.6-1
           imagePullPolicy: IfNotPresent
           args: ["mds"]
           env:

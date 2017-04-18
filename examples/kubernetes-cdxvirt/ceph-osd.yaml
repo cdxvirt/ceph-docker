@@ -33,14 +33,14 @@ spec:
             path: /etc/localtime
       containers:
         - name: ceph-osd-pod
-          image: cdxvirt/ceph-daemon:latest
+          image: cdxvirt/ceph-daemon:daemon-10.2.6-1
           imagePullPolicy: IfNotPresent
           securityContext:
             privileged: true
           args: ["osd_controller"]
           env:
             - name: "DAEMON_VERSION"
-              value: "cdxvirt/ceph-daemon:latest"
+              value: "cdxvirt/ceph-daemon:daemon-10.2.6-1"
             - name: "DEBUG_MODE"
               value: "false"
             - name: "CRUSH_TYPE"
