@@ -1,0 +1,44 @@
+apiVersion: extensions/v1beta1
+kind: DaemonSet
+metadata:
+  name: ceph-osd
+  labels:
+    name: ceph-osd
+  namespace: ceph
+spec:
+  template:
+    metadata:
+      labels:
+        name: ceph-osd
+    spec:
+      hostNetwork: true
+      nodeSelector:
+        cdx/ceph-osd: "true"
+      volumes:
+        - name: cephlog
+          hostPath:
+            path: /var/log/ceph
+        - name: localtime
+          hostPath:
+            path: /etc/localtime
+        - name: dev
+          hostPath:
+            path: /dev/
+      containers:
+        - name: ceph-osd-pod
+          image: cdxvirt/ceph-daemon:cdxvirt-luminous
+          securityContext:
+            privileged: true
+          args: ["cdx_osd"]
+          env:
+            - name: "MAX_OSD"
+              value: "3"
+            - name: "CDX_ENV"
+              value: "true"
+          volumeMounts:
+            - name: cephlog
+              mountPath: /var/log/ceph
+            - name: localtime
+              mountPath: /etc/localtime
+            - name: dev
+              mountPath: /dev/

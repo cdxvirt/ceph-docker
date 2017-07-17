@@ -1,0 +1,44 @@
+apiVersion: extensions/v1beta1
+kind: DaemonSet
+metadata:
+  name: ceph-mon
+  labels:
+    name: ceph-mon
+  namespace: ceph
+spec:
+  template:
+    metadata:
+      labels:
+        name: ceph-mon
+    spec:
+      hostNetwork: true
+      nodeSelector:
+        cdx/ceph-mon: "true"
+      volumes:
+        - name: cephconfig
+          hostPath:
+            path: /var/lib/ceph
+        - name: cephlog
+          hostPath:
+            path: /var/log/ceph
+        - name: localtime
+          hostPath:
+            path: /etc/localtime
+      containers:
+        - name: ceph-mon-pod
+          image: cdxvirt/ceph-daemon:cdxvirt-luminous
+          args: ["mon"]
+          env:
+            - name: "CEPH_PUBLIC_NETWORK"
+              value: "192.168.32.0/23"
+            - name: "CEPH_CLUSTER_NETWORK"
+              value: "192.168.32.0/23"
+            - name: "CDX_ENV"
+              value: "true"
+          volumeMounts:
+            - name: cephconfig
+              mountPath: /var/lib/ceph
+            - name: cephlog
+              mountPath: /var/log/ceph
+            - name: localtime
+              mountPath: /etc/localtime

@@ -2,6 +2,7 @@
 set -e
 export LC_ALL=C
 
+source cdx/cdx.sh
 source variables_entrypoint.sh
 source common_functions.sh
 source debug.sh
@@ -46,6 +47,7 @@ case "$CEPH_DAEMON" in
     ;;
   mon)
     # TAG: mon
+    source cdx/mon.sh
     source start_mon.sh
     start_mon
     ;;
@@ -150,6 +152,13 @@ case "$CEPH_DAEMON" in
   demo)
     # TAG: demo
     source demo.sh
+    ;;
+  cdx_osd)
+    source cdx/osd.sh
+    ;;
+  bash)
+    shift
+    exec_own_command $@
     ;;
   *)
     invalid_ceph_daemon

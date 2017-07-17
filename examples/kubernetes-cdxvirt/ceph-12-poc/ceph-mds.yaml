@@ -1,0 +1,30 @@
+apiVersion: extensions/v1beta1
+kind: DaemonSet
+metadata:
+  name: ceph-mds
+  labels:
+    name: ceph-mds
+  namespace: ceph
+spec:
+  template:
+    metadata:
+      labels:
+        name: ceph-mds
+    spec:
+      hostNetwork: true
+      nodeSelector:
+        cdx/ceph-mds: "true"
+      volumes:
+        - name: localtime
+          hostPath:
+            path: /etc/localtime
+      containers:
+        - name: ceph-mds-pod
+          image: cdxvirt/ceph-daemon:cdxvirt-luminous
+          args: ["mds"]
+          env:
+            - name: "CDX_ENV"
+              value: "true"
+          volumeMounts:
+            - name: localtime
+              mountPath: /etc/localtime
