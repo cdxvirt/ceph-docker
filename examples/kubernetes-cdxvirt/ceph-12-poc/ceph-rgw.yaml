@@ -1,0 +1,30 @@
+apiVersion: extensions/v1beta1
+kind: DaemonSet
+metadata:
+  name: ceph-rgw
+  labels:
+    name: ceph-rgw
+  namespace: ceph
+spec:
+  template:
+    metadata:
+      labels:
+        name: ceph-rgw
+    spec:
+      hostNetwork: true
+      nodeSelector:
+        cdx/ceph-rgw: "true"
+      volumes:
+        - name: localtime
+          hostPath:
+            path: /etc/localtime
+      containers:
+        - name: ceph-rgw-pod
+          image: cdxvirt/ceph-daemon:cdxvirt-luminous
+          args: ["rgw"]
+          env:
+            - name: "CDX_ENV"
+              value: "true"
+          volumeMounts:
+            - name: localtime
+              mountPath: /etc/localtime
