@@ -1,7 +1,7 @@
 #!/bin/bash
 
 : ${CEPH_IMG:="cdxvirt/ceph-daemon:latest"}
-if ! DOCKER_CMD=$(command -v docker 2>/dev/null); then
+if ! DOCKER_CMD=$(which docker 2>/dev/null); then
   echo $(date +"%Y-%m-%d %H:%M:%S.%6N") "docker: command not found."
   exit 1
 fi
