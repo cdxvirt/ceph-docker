@@ -1,6 +1,6 @@
 #!/bin/bash
 
-: ${CEPH_IMG:="cdxvirt/ceph-daemon:latest"}
+: ${CEPH_IMG:="cdxvirt/ceph-daemon:daemon-10.2.9-1"}
 if ! DOCKER_CMD=$(which docker 2>/dev/null); then
   echo "ERROR- docker: command not found."
   exit 1
