@@ -1,0 +1,47 @@
+kind: ReplicationController
+apiVersion: v1
+metadata:
+  name: cdx-controller
+  namespace: ceph
+spec:
+  template:
+    metadata:
+      labels:
+        name: cdx-controller
+    spec:
+      hostNetwork: true
+      volumes:
+        - name: localtime
+          hostPath:
+            path: /etc/localtime
+        - name: dev
+          hostPath:
+            path: /dev
+        - name: lib-modules
+          hostPath:
+            path: /lib/modules
+      containers:
+        - name: cdx-controller-pod
+          image: cdxvirt/ceph-daemon:latest
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            privileged: true
+          args: ["cdx_controller"]
+          env:
+            - name: "CEPH_PUBLIC_NETWORK"
+              value: "192.168.32.0/23"
+            - name: "CEPH_CLUSTER_NETWORK"
+              value: "192.168.32.0/23"
+            - name: "K8S_NETWORK"
+              value: "192.168.32.0/23"
+#            - name: "DEBUG"
+#              value: "verbose"
+            - name: "CDX_ENV"
+              value: "true"
+          volumeMounts:
+            - name: localtime
+              mountPath: /etc/localtime
+            - name: dev
+              mountPath: /dev
+            - name: lib-modules
+              mountPath: /lib/modules

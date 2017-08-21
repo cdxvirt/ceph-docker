@@ -1,0 +1,48 @@
+# ceph.defaults
+# for more config options see: https://github.com/ceph/ceph/blob/master/src/common/config_opts.h
+# the format is key_path value
+# the key path will be prefixed by /ceph-config/$CLUSTER
+
+# auth
+/auth/cephx true
+
+# auth
+/global/max_open_files 131072
+
+#osd
+/osd/osd_journal_size 2048
+
+# these 2 should be passed at runtime to the container.
+#/osd/cluster_network 198.100.128.0/19
+#/osd/public_network 198.100.128.0/19
+
+#mon
+/mon/mon_clock_drift_allowed .5
+/mon/mon_force_quorum_join true
+
+#crush
+/global/osd_pool_default_pg_num 16
+/global/osd_pool_default_pgp_num 16
+/global/osd_pool_default_size 1
+/osd/pool_default_crush_rule 0
+/osd/osd_crush_update_on_start true
+
+#performance tuning
+/osd/filestore_merge_threshold 40
+/osd/filestore_split_multiple 8
+/osd/osd_op_threads 8
+/osd/filestore_op_threads 8
+/osd/filestore_max_sync_interval 5
+/osd/osd_max_scrubs 1
+
+#recovery tuning
+/osd/osd_recovery_max_active 5
+/osd/osd_max_backfills 2
+/osd/osd_recovery_op_priority 2
+/osd/osd_client_op_priority 63
+/osd/osd_recovery_max_chunk 1048576
+/osd/osd_recovery_threads 1
+
+#client
+#layerring 1, exclusive-lock 4
+/client/rbd_default_features 5

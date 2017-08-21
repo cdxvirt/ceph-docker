@@ -71,7 +71,8 @@ function create_mandatory_directories {
   mkdir -p /var/lib/ceph/mds/"${CLUSTER}-${MDS_NAME}"
 
   # Adjust the owner of all those directories
-  chown --verbose -R ceph. /var/run/ceph/ /var/lib/ceph/*
+  chown --verbose -R ceph. /var/run/ceph/
+  find -L /var/lib/ceph/ -mindepth 1 -maxdepth 3 -exec chown --verbose ceph. {} \;
 }
 
 
@@ -247,6 +248,7 @@ function apply_ceph_ownership_to_disks {
     wait_for_file "$(dev_part "${OSD_DEVICE}" 2)"
     chown --verbose ceph. "$(dev_part "${OSD_DEVICE}" 2)"
   fi
+  wait_for_file "$(dev_part "${OSD_DEVICE}" 1)"
   chown --verbose ceph. "$(dev_part "${OSD_DEVICE}" 1)"
 }
 
@@ -260,4 +262,20 @@ function ceph_health {
     log "Also verify the validity of client.bootstrap-osd keyring."
     exit 1
   fi
+}
+
+# shellcheck disable=SC2153
+function add_osd_to_crush {
+  # only add crush_location if the current is empty
+  local crush_loc
+  OSD_KEYRING="$OSD_PATH/keyring"
+  crush_loc=$(ceph "${CLI_OPTS[@]}" --name=osd."${OSD_ID}" --keyring="$OSD_KEYRING" osd find "${OSD_ID}"|python -c 'import sys, json; print(json.load(sys.stdin)["crush_location"])')
+  if [[ "$crush_loc" == "{}" ]]; then
+    ceph "${CLI_OPTS[@]}" --name=osd."${OSD_ID}" --keyring="$OSD_KEYRING" osd crush create-or-move -- "${OSD_ID}" "${OSD_WEIGHT}" "${CRUSH_LOCATION[@]}"
+  fi
+}
+
+function calculate_osd_weight {
+  OSD_PATH=$(get_osd_path "$OSD_ID")
+  OSD_WEIGHT=$(df -P -k "$OSD_PATH" | tail -1 | awk '{ d= $2/1073741824 ; r = sprintf("%.2f", d); print r }')
 }

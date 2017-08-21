@@ -12,20 +12,11 @@ ENV KUBECTL_VERSION v1.6.0
 # Download confd
 ADD https://github.com/kelseyhightower/confd/releases/download/v${CONFD_VERSION}/confd-${CONFD_VERSION}-linux-amd64 /usr/local/bin/confd
 
-# Download forego
-ADD https://bin.equinox.io/c/ekMN3bCZFUn/forego-stable-linux-amd64.tgz /forego.tgz
-
 # Packages list
 ARG PACKAGES="ceph-mon ceph-osd ceph-mds ceph-mgr ceph-base ceph-common radosgw rbd-mirror sharutils etcd s3cmd"
 
-# cdxvirt packages
-ARG CDXVIRT_PKG="grepcidr vim"
-
 # install prerequisites
 RUN DEBIAN_FRONTEND=noninteractive apt-get update && apt-get install -y wget unzip uuid-runtime python-setuptools udev dmsetup && \
-\
-# install packages for cdxvirt
-    apt-get install -y $CDXVIRT_PKG && \
 \
 # Install ceph, ganesha and etcd
     wget -q -O- 'https://download.ceph.com/keys/release.asc' | apt-key add - && \
@@ -38,6 +29,7 @@ RUN DEBIAN_FRONTEND=noninteractive apt-get update && apt-get install -y wget unz
     chmod +x /usr/local/bin/confd && mkdir -p /etc/confd/conf.d && mkdir -p /etc/confd/templates && \
 \
 # Install forego
+    wget -O /forego.tgz 'https://bin.equinox.io/c/ekMN3bCZFUn/forego-stable-linux-amd64.tgz' && \
     cd /usr/local/bin && tar xfz /forego.tgz && chmod +x /usr/local/bin/forego && rm /forego.tgz
 
 # Install kubectl
@@ -49,9 +41,6 @@ ADD s3cfg /root/.s3cfg
 
 # Add bootstrap script, ceph defaults key/values for KV store
 ADD *.sh ceph.defaults check_zombie_mons.py ./osd_scenarios/* entrypoint.sh.in disabled_scenario /
-
-# Add cdxvirt scripts
-ADD cdx /cdx
 
 # Modify the entrypoint
 RUN bash "/generate_entrypoint.sh" && \

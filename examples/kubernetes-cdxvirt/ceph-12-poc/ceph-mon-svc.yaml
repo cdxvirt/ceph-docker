@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: ceph-mon
+  namespace: ceph
+  labels:
+    name: ceph-mon
+spec:
+  clusterIP: None
+  ports:
+  - port: 6789
+    protocol: TCP

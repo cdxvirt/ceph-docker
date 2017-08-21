@@ -170,6 +170,80 @@ ceph-osd-ieio7         1/1       Running   2          2m
 ceph-osd-j1gyd         1/1       Running   2          2m
 ```
 
+### Persistent OSD disk
+Alternatively, you can use persistent OSD disks using the following steps.
+
+After creating `mon` deployment, rather than creating OSD daemonset, choose a disk on the storage node and prepare OSD disks.
+As illustrated in [ceph-osd-prepare-v1-ds.yaml](ceph-osd-prepare-v1-ds.yaml) and [ceph-osd-activate-v1-ds.yaml](ceph-osd-activate-v1-ds.yaml), the daemonset prepares and activates `/dev/sdc`
+
+```
+kubectl create -f ceph-osd-prepare-v1-ds.yaml --namespace=ceph
+```
+
+Run `kubectl get all --namespace=ceph` and watch daemonset `ceph-osd-prepared` is completed. Then delete the `ceph-osd-prepare` daemonset
+and create `ceph-osd-activate` daemonset:
+
+```
+kubectl delete -f ceph-osd-prepare-v1-ds.yaml --namespace=ceph
+kubectl create -f ceph-osd-activate-v1-ds.yaml --namespace=ceph
+```
+
+
+
+
+### Creating RBD Storage Class
+
+First, create a RBD provisioner pod:
+
+```
+$ kubectl create -f https://raw.githubusercontent.com/kubernetes-incubator/external-storage/master/ceph/rbd/deployment.yaml --namespace=ceph
+```
+Then, if there is no Ceph admin secret with type `kubernetes.io/rbd`, create one:
+
+```
+$ kubectl create secret generic ceph-secret-admin --from-file=generator/ceph-client-key --type=kubernetes.io/rbd --namespace=ceph
+```
+
+Create a RBD storage class using the following `rbd-class.yaml`:
+
+```yaml
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+   name: slow
+provisioner: ceph.com/rbd
+parameters:
+    monitors: ceph-mon.ceph.svc.cluster.local:6789
+    adminId: admin
+    adminSecretName: ceph-secret-admin
+    adminSecretNamespace: "ceph"
+```
+
+Now, try create a claim:
+```
+$ kubectl create -f https://raw.githubusercontent.com/kubernetes/examples/master/staging/persistent-volume-provisioning/claim1.json
+```
+
+If everything works, expect something like the following:
+
+```
+$ kubectl describe pvc claim1
+Name:           claim1
+Namespace:      default
+StorageClass:
+Status:         Bound
+Volume:         pvc-a9247186-6e59-11e7-b7b6-00259003b6e8
+Labels:         <none>
+Capacity:       3Gi
+Access Modes:   RWO
+Events:
+  FirstSeen     LastSeen        Count   From                                                                                    SubObjectPath   Type            Reason                  Message
+  ---------     --------        -----   ----                                                                                    -------------   --------        ------                  -------
+  6m            6m              2       {persistentvolume-controller }                                                                 Normal           ExternalProvisioning    cannot find provisioner "ceph.com/rbd", expecting that a volume for the claim is provisioned either manually or via external software
+  6m            6m              1       {ceph.com/rbd rbd-provisioner-217120805-9dc84 57e293c8-6e59-11e7-a834-ca4351e8550d }           Normal           Provisioning            External provisioner is provisioning volume for claim "default/claim1"
+  6m            6m              1       {ceph.com/rbd rbd-provisioner-217120805-9dc84 57e293c8-6e59-11e7-a834-ca4351e8550d }           Normal           ProvisioningSucceeded   Successfully provisioned volume pvc-a9247186-6e59-11e7-b7b6-00259003b6e8
+```
+
 ### Mounting CephFS in a pod
 
 First you must add the admin client key to your current namespace (or the namespace of your pod).

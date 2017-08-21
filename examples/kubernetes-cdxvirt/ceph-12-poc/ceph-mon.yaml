@@ -15,30 +15,39 @@ spec:
       nodeSelector:
         cdx/ceph-mon: "true"
       volumes:
-        - name: cephconfig
+        - name: cephdata
           hostPath:
             path: /var/lib/ceph
-        - name: cephlog
-          hostPath:
-            path: /var/log/ceph
         - name: localtime
           hostPath:
             path: /etc/localtime
       containers:
         - name: ceph-mon-pod
-          image: cdxvirt/ceph-daemon:cdxvirt-luminous
-          args: ["mon"]
+          image: cdxvirt/ceph-daemon:latest
+          imagePullPolicy: IfNotPresent
+          args: ["cdx_mon"]
           env:
             - name: "CEPH_PUBLIC_NETWORK"
               value: "192.168.32.0/23"
             - name: "CEPH_CLUSTER_NETWORK"
               value: "192.168.32.0/23"
+            - name: "K8S_NETWORK"
+              value: "192.168.32.0/23"
+#            - name: "DEBUG"
+#              value: "verbose"
             - name: "CDX_ENV"
               value: "true"
+          livenessProbe:
+            failureThreshold: 3
+            initialDelaySeconds: 60
+            periodSeconds: 10
+            successThreshold: 1
+            exec:
+              command:
+              - /cdx/mon-liveprobe.sh
+            timeoutSeconds: 5
           volumeMounts:
-            - name: cephconfig
+            - name: cephdata
               mountPath: /var/lib/ceph
-            - name: cephlog
-              mountPath: /var/log/ceph
             - name: localtime
               mountPath: /etc/localtime

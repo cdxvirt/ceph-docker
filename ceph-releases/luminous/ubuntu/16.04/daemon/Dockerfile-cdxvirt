@@ -1,0 +1,22 @@
+# CEPH DAEMON IMAGE
+# CEPH VERSION: Luminous
+# CEPH VERSION DETAIL: 12.x.x
+
+FROM cdxvirt/ceph-base:base-12.1.4
+MAINTAINER CDXVIRT
+
+# cdxvirt packages
+ARG CDXVIRT_PKG="curl grepcidr inotify-tools vim kmod jq mdadm lvm2 net-tools"
+
+# install packages for cdxvirt
+RUN DEBIAN_FRONTEND=noninteractive apt-get update && apt-get install -y $CDXVIRT_PKG && \
+    apt-get clean && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+
+# Add cdxvirt scripts
+ADD cdx /cdx
+RUN mv /cdx/ceph.defaults /cdx/entrypoint.sh /
+RUN mv /cdx/ceph-api /usr/local/bin/ceph-api
+
+# Execute the entrypoint
+WORKDIR /
+ENTRYPOINT ["/entrypoint.sh"]

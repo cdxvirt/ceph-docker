@@ -43,6 +43,7 @@ ALL_SCENARIOS="populate_kvstore mon osd osd_directory osd_directory_single osd_c
 : "${RGW_NAME:=${HOSTNAME}}"
 : "${RGW_ZONEGROUP:=}"
 : "${RGW_ZONE:=}"
+: "${RGW_CIVETWEB_IP:=0.0.0.0}"
 : "${RGW_CIVETWEB_PORT:=8080}"
 : "${RGW_REMOTE_CGI:=0}"
 : "${RGW_REMOTE_CGI_PORT:=9000}"
@@ -55,13 +56,13 @@ ALL_SCENARIOS="populate_kvstore mon osd osd_directory osd_directory_single osd_c
 : "${RESTAPI_LOG_FILE:=/var/log/ceph/ceph-restapi.log}"
 : "${KV_TYPE:=none}" # valid options: etcd, k8s|kubernetes or none
 : "${KV_IP:=127.0.0.1}"
-: "${KV_PORT:=4001}"
+: "${KV_PORT:=2379}"
 : "${GANESHA_OPTIONS:=""}"
 : "${GANESHA_EPOCH:=""}" # For restarting
 
 # Create a default array
 CRUSH_LOCATION_DEFAULT=("root=default" "host=${HOSTNAME}")
-CRUSH_LOCATION=("${CRUSH_LOCATION[@]:-${CRUSH_LOCATION_DEFAULT[@]}}")
+[[ -n "$CRUSH_LOCATION" ]] || read -ra CRUSH_LOCATION <<< "${CRUSH_LOCATION_DEFAULT[@]}"
 
 # This is ONLY used for the CLI calls, e.g: ceph $CLI_OPTS health
 CLI_OPTS=(--cluster ${CLUSTER})

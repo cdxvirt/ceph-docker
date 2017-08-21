@@ -1,9 +1,7 @@
-apiVersion: extensions/v1beta1
 kind: DaemonSet
+apiVersion: extensions/v1beta1
 metadata:
   name: ceph-rgw
-  labels:
-    name: ceph-rgw
   namespace: ceph
 spec:
   template:
@@ -20,11 +18,14 @@ spec:
             path: /etc/localtime
       containers:
         - name: ceph-rgw-pod
-          image: cdxvirt/ceph-daemon:cdxvirt-luminous
+          image: cdxvirt/ceph-daemon:latest
+          imagePullPolicy: IfNotPresent
           args: ["rgw"]
           env:
             - name: "CDX_ENV"
               value: "true"
+#            - name: "DEBUG"
+#              value: "verbose"
           volumeMounts:
             - name: localtime
               mountPath: /etc/localtime

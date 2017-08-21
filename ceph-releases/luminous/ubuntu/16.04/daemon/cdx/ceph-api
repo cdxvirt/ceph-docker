@@ -1,0 +1,3 @@
+#! /bin/bash
+
+CDX_ENV=true /entrypoint.sh ceph-api $@

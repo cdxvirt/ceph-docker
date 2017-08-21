@@ -1,0 +1,11 @@
+#!/bin/bash
+
+: ${CEPH_IMG:="cdxvirt/ceph-daemon:latest"}
+if ! DOCKER_CMD=$(which docker 2>/dev/null); then
+  echo "ERROR- docker: command not found."
+  exit 1
+fi
+
+LD_LIBRARY_PATH=/lib:/host/lib "${DOCKER_CMD}" run --rm --privileged=true --net=host --pid=host \
+-v /dev/:/dev/ -v /etc/ceph:/etc/ceph -v /lib/modules/:/lib/modules/ \
+-e CDX_ENV=true -e KV_TYPE=etcd -e KV_PORT=2379 "${CEPH_IMG}" admin rbd "$@"

@@ -65,7 +65,7 @@ function osd_disk_prepare {
     echo "Unmounting LOCKBOX directory"
     # NOTE(leseb): adding || true so when this bug will be fixed the entrypoint will not fail
     # Ceph bug tracker: http://tracker.ceph.com/issues/18944
-    DATA_UUID=$(blkid -o value -s PARTUUID "${OSD_DEVICE}"1)
+    DATA_UUID=$(blkid -o value -s PARTUUID "$(dev_part "${OSD_DEVICE}" 1)")
     umount /var/lib/ceph/osd-lockbox/"${DATA_UUID}" || true
   elif [[ -n "${OSD_JOURNAL}" ]]; then
     ceph-disk -v prepare "${CLI_OPTS[@]}" --journal-uuid "${OSD_JOURNAL_UUID}" "${OSD_DEVICE}" "${OSD_JOURNAL}"
@@ -75,8 +75,6 @@ function osd_disk_prepare {
 
   # watch the udev event queue, and exit if all current events are handled
   udevadm settle --timeout=600
-
-  sleep 5
 
   apply_ceph_ownership_to_disks
 }

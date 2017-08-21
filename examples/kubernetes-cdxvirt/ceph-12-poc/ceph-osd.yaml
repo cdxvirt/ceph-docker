@@ -2,43 +2,78 @@ apiVersion: extensions/v1beta1
 kind: DaemonSet
 metadata:
   name: ceph-osd
-  labels:
-    name: ceph-osd
   namespace: ceph
 spec:
   template:
     metadata:
       labels:
         name: ceph-osd
+      annotations:
+        pod.beta.kubernetes.io/init-containers: '[
+            {
+                "name": "check-monitor-running",
+                "image": "cdxvirt/ceph-daemon:latest",
+                "imagePullPolicy": "IfNotPresent",
+                "command": ["/bin/bash","-c"],
+                "args": ["source /cdx/cdx-env.sh && curl -d null ceph-mon.ceph:6789"]
+            }
+        ]'
     spec:
       hostNetwork: true
       nodeSelector:
         cdx/ceph-osd: "true"
       volumes:
-        - name: cephlog
+        - name: docker
           hostPath:
-            path: /var/log/ceph
-        - name: localtime
+            path: /bin/docker
+        - name: docker-sock
           hostPath:
-            path: /etc/localtime
+            path: /var/run/docker.sock
+        - name: hostlib
+          hostPath:
+            path: /usr/lib64
         - name: dev
           hostPath:
             path: /dev/
+        - name: opt-bin
+          hostPath:
+            path: /opt/bin/
+        - name: localtime
+          hostPath:
+            path: /etc/localtime
       containers:
         - name: ceph-osd-pod
-          image: cdxvirt/ceph-daemon:cdxvirt-luminous
+          image: cdxvirt/ceph-daemon:latest
+          imagePullPolicy: IfNotPresent
           securityContext:
             privileged: true
           args: ["cdx_osd"]
           env:
-            - name: "MAX_OSD"
-              value: "3"
+            - name: "DAEMON_VERSION"
+              value: "cdxvirt/ceph-daemon:latest"
+#            - name: "DEBUG"
+#              value: "verbose"
             - name: "CDX_ENV"
               value: "true"
+          livenessProbe:
+            failureThreshold: 3
+            initialDelaySeconds: 180
+            periodSeconds: 10
+            successThreshold: 1
+            exec:
+              command:
+              - /cdx/osd-ctl-liveprobe.sh
+            timeoutSeconds: 5
           volumeMounts:
-            - name: cephlog
-              mountPath: /var/log/ceph
-            - name: localtime
-              mountPath: /etc/localtime
+            - name: docker
+              mountPath: /bin/docker
+            - name: docker-sock
+              mountPath: /var/run/docker.sock
+            - name: hostlib
+              mountPath: /host/lib
             - name: dev
               mountPath: /dev/
+            - name: opt-bin
+              mountPath: /opt/bin/
+            - name: localtime
+              mountPath: /etc/localtime
