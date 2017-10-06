@@ -5,13 +5,6 @@
 ##############
 
 function crush_initialization {
-  # DO NOT EDIT DEFAULT POOL
-  DEFAULT_POOL=rbd
-
-  # Default crush leaf [ osd | host ] & replication size 1 ~ 9
-  : ${DEFAULT_CRUSH_LEAF:=osd}
-  : ${DEFAULT_POOL_COPIES:=1}
-
   # check ceph command is usable
   until timeout 10 ceph "${CLI_OPTS[@]}" health &>/dev/null; do
     log "WARN- Waitiing for ceph cluster ready."
@@ -36,18 +29,6 @@ function crush_initialization {
     log "Initialization of crushmap"
     # create a crush rule, chooseleaf as osd.
     ceph "${CLI_OPTS[@]}" osd crush rule create-simple replicated_type_osd default osd firstn
-    # crush_ruleset host, osd
-    set_crush_ruleset "${DEFAULT_POOL}" "${DEFAULT_CRUSH_LEAF}"
-    # Replication size of rbd pool
-    # check size in the range 1 ~ 9
-    local re='^[1-9]$'
-    if ! [[ "${DEFAULT_POOL_COPIES}" =~ "${re}" ]]; then
-      local size_defined_on_etcd=$(etcdctl "${ETCDCTL_OPTS[@]}" "${KV_TLS[@]}" get "${CLUSTER_PATH}"/global/osd_pool_default_size)
-      ceph "${CLI_OPTS[@]}" osd pool set "${DEFAULT_POOL}" size "${size_defined_on_etcd}"
-      log "WARN- DEFAULT_POOL_COPIES is not in the range 1 ~ 9, using default value ${size_defined_on_etcd}"
-    else
-      ceph "${CLI_OPTS[@]}" osd pool set "${DEFAULT_POOL}" size "${DEFAULT_POOL_COPIES}"
-    fi
     etcdctl "${ETCDCTL_OPTS[@]}" "${KV_TLS[@]}" set "${CLUSTER_PATH}"/initialization_complete true &>/dev/null
   fi
 
@@ -62,8 +43,16 @@ function crush_initialization {
 
 function auto_change_crush {
   # DO NOT EDIT DEFAULT POOL
-  DEFAULT_POOL=rbd
-  # If there are no osds, We don't change pg_num
+  RBD_POOL=rbd
+  DEFAULT_POOLS="rbd cephfs_data cephfs_metadata .rgw.root default.rgw.control default.rgw.data.root default.rgw.gc default.rgw.log default.rgw.users.uid default.rgw.buckets.data default.rgw.buckets.index default.rgw.users.keys default.rgw.meta default.rgw.buckets.non-ec"
+  CURRENT_POOLS=""
+  for pool in $(rados "${CLI_OPTS[@]}" lspools 2>/dev/null); do
+    if grep -o -q ${pool} <<< "${DEFAULT_POOLS}"; then
+      CURRENT_POOLS="${CURRENT_POOLS} ${pool}"
+    fi
+  done
+
+  # If there are no osds, We don't change crush
   health_log=$(timeout 10 ceph "${CLI_OPTS[@]}" health 2>/dev/null)
   if echo "${health_log}" | grep -q "no osds"; then
     return 0
@@ -84,7 +73,7 @@ function auto_change_crush {
   # NODES not include some host weight=0
   NODEs=$(ceph "${CLI_OPTS[@]}" osd tree | awk '/host/ { print $2 }' | grep -v ^0$ -c || true)
   # Only count OSD that status is up
-  OSDs=$(ceph "${CLI_OPTS[@]}" osd stat | awk '{ print $5 }')
+  OSDs=$(ceph "${CLI_OPTS[@]}" osd stat -f json 2>/dev/null | jq --raw-output ".num_up_osds")
   # Put crush type into ETCD
   etcdctl "${ETCDCTL_OPTS[@]}" "${KV_TLS[@]}" set "${CLUSTER_PATH}"/crush_type "${CRUSH_TYPE}" &>/dev/null
 
@@ -116,11 +105,11 @@ function crush_type_space {
     log "WARN- No Storage Node, do nothing with changing crush_type"
     return 0
   elif [ "${NODEs}" -eq "1" ]; then
-    set_pool_size "${DEFAULT_POOL}" 1
-    set_crush_ruleset "${DEFAULT_POOL}" osd
+    set_pool_size 1 "${CURRENT_POOLS}"
+    set_crush_ruleset osd "${CURRENT_POOLS}"
   else
-    set_pool_size "${DEFAULT_POOL}" 2
-    set_crush_ruleset "${DEFAULT_POOL}" host
+    set_pool_size 2 "${CURRENT_POOLS}"
+    set_crush_ruleset host "${CURRENT_POOLS}"
   fi
 
   # multiple = OSDs / 2, pg_num = PGs_PER_OSD x multiple
@@ -130,7 +119,7 @@ function crush_type_space {
     local multiple=1
   fi
   local PG_NUM=$(expr "${PGs_PER_OSD}" '*' "${multiple}")
-  set_pg_num "${DEFAULT_POOL}" "${PG_NUM}"
+  set_pg_num "${RBD_POOL}" "${PG_NUM}"
 }
 
 # auto change pg & crush leaf. Max replications is 3.
@@ -140,11 +129,11 @@ function crush_type_safety {
     log "WARN- No Storage Node, do nothing with changing crush_type"
     return 0
   elif [ "${NODEs}" -lt "3" ]; then
-    set_pool_size "${DEFAULT_POOL}" "${NODEs}"
-    set_crush_ruleset "${DEFAULT_POOL}" osd
+    set_pool_size "${NODEs}" "${CURRENT_POOLS}"
+    set_crush_ruleset osd "${CURRENT_POOLS}"
   else
-    set_pool_size "${DEFAULT_POOL}" 3
-    set_crush_ruleset "${DEFAULT_POOL}" host
+    set_pool_size 3 "${CURRENT_POOLS}"
+    set_crush_ruleset host "${CURRENT_POOLS}"
   fi
 
   # multiple = OSDs / 3, pg_num = PGs_PER_OSD x multiple
@@ -154,13 +143,14 @@ function crush_type_safety {
     local multiple=1
   fi
   local PG_NUM=$(expr "${PGs_PER_OSD}" '*' "${multiple}")
-  set_pg_num "${DEFAULT_POOL}" "${PG_NUM}"
+  set_pg_num "${RBD_POOL}" "${PG_NUM}"
 }
 
 function set_crush_ruleset {
-  # $1 = pool_name $2 = crush_ruleset {osd|host}
-  local POOL_NAME="$1"
-  local CRUSH_RULE="$2"
+  # $1 = crush_ruleset {osd|host}, $2- = pool_name
+  local CRUSH_RULE="$1"
+  shift
+  local POOL_NAME="$*"
   case "${CRUSH_RULE}" in
     host)
       local CRUSH_RULESET=0
@@ -174,21 +164,26 @@ function set_crush_ruleset {
       ;;
   esac
 
-  if ceph "${CLI_OPTS[@]}" osd pool set "${POOL_NAME}" crush_ruleset "${CRUSH_RULESET}" &>/dev/null; then
-    log "Set pool $1 crush_ruleset to ${CRUSH_RULE}"
-  else
-    log "Fail to set crush_ruleset of $1 pool"
-    return 0
-  fi
+  for pool in ${POOL_NAME}; do
+    if ceph "${CLI_OPTS[@]}" osd pool set "${pool}" crush_ruleset "${CRUSH_RULESET}" &>/dev/null; then
+      log "Set pool ${pool} crush_ruleset to ${CRUSH_RULE}"
+    else
+      log "Fail to set crush_ruleset of ${pool} pool"
+    fi
+  done
 }
 
 function set_pool_size {
-  # $1 = pool_name $2 = pool_size
-  log "Set pool $1 replications to $2"
-  if ! ceph "${CLI_OPTS[@]}" osd pool set "$1" size "$2" 2>/dev/null; then
-    log "WARN- Fail to set replications of $1 pool"
-    return 0
-  fi
+  # $1 = pool_size, $2 = pool_name
+  local POOL_SIZE="$1"
+  shift
+  local POOL_NAME="$*"
+  for pool in ${POOL_NAME}; do
+    log "Set pool ${pool} replications to ${POOL_SIZE}"
+    if ! ceph "${CLI_OPTS[@]}" osd pool set "${pool}" size "${POOL_SIZE}" 2>/dev/null; then
+      log "WARN- Fail to set replications of ${pool} pool"
+    fi
+  done
 }
 
 function set_pg_num {
