@@ -18,7 +18,7 @@ spec:
             path: /etc/localtime
       containers:
         - name: ceph-rgw-pod
-          image: cdxvirt/ceph-daemon:daemon-10.2.9-1
+          image: cdxvirt/ceph-daemon:daemon-10.2.9-2
           imagePullPolicy: IfNotPresent
           args: ["rgw"]
           env:
