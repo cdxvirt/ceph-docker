@@ -204,3 +204,14 @@ function set_pg_num {
   fi
 }
 
+function check_leaf_avail {
+  local REPLICA=$(ceph "${CLI_OPTS[@]}" osd pool ls detail -f json 2>/dev/null | jq --raw-output .[0].size)
+  local NODE_JSON=$(ceph "${CLI_OPTS[@]}" osd tree -f json | jq --raw-output '.nodes[] | select(.type=="host") | {"name": (.name), "number": (.children | length)}')
+  local AVAL_NODES=$(echo "${NODE_JSON}" | jq --raw-output ' . | select(.number>0) | .name' | wc -w)
+
+  if [ "${AVAL_NODES}" -ge "${REPLICA}" ]; then
+    echo "HOST"
+  else
+    echo "OSD"
+  fi
+}

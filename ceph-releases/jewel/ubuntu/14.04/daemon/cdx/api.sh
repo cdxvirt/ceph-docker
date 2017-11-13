@@ -20,6 +20,10 @@ function cdx_ceph_api {
       # Commands in this script part 2
       $@
       ;;
+    get_crush_leaf|check_leaf_avail|set_crush_leaf)
+      # Commands in this script part 3
+      $@
+      ;;
     *)
       log "WARN- Wrong options. See function cdx_ceph_api."
       return 2
@@ -243,7 +247,6 @@ function set_all_replica {
     ceph "${CLI_OPTS[@]}" osd pool set "${pool}" size "${EXP_SIZE}" &>/dev/null
   done
   echo "SUCCESS"
-
 }
 
 function stop_osd {
@@ -277,3 +280,62 @@ function start_osd {
   kubectl "${K8S_CERT[@]}" "${K8S_NAMESPACE[@]}" exec "${O_POD}" ceph-api start_or_create_a_osd "${DISK}" "${ACT}"
 }
 
+function check_leaf_avail {
+  local REPLICA=$(ceph "${CLI_OPTS[@]}" osd pool ls detail -f json 2>/dev/null | jq --raw-output .[0].size)
+  local NODE_JSON=$(ceph "${CLI_OPTS[@]}" osd tree -f json | jq --raw-output '.nodes[] | select(.type=="host") | {"name": (.name), "number": (.children | length)}')
+  local AVAL_NODES=$(echo "${NODE_JSON}" | jq --raw-output ' . | select(.number>0) | .name' | wc -w)
+
+  if [ "${AVAL_NODES}" -ge "${REPLICA}" ]; then
+    echo "HOST"
+  else
+    echo "OSD"
+  fi
+}
+
+function get_crush_leaf {
+  local CRUSH_RULE=$(ceph "${CLI_OPTS[@]}" osd pool ls detail -f json 2>/dev/null | jq --raw-output .[0].crush_ruleset)
+  case ${CRUSH_RULE} in
+    0)
+      echo "HOST"
+      ;;
+    1)
+      echo "OSD"
+      ;;
+    *)
+      >&2 echo "FALSE"
+      return 1
+      ;;
+  esac
+}
+
+function set_crush_leaf {
+  local EXP_LEAF=${1}
+  local AVAIL_LEAF=$(check_leaf_avail)
+  local SET_LEAF=""
+  if [ "${EXP_LEAF}" != "OSD" ] && [ "${EXP_LEAF}" != "HOST" ]; then
+    >&2 echo "FALSE"
+    return 1
+  elif [ "${EXP_LEAF}" == "HOST" ] && [ "${AVAIL_LEAF}" == "OSD" ]; then
+    >&2 echo "FALSE"
+    return 2
+  fi
+
+  local POOL_JSON=$(ceph "${CLI_OPTS[@]}" osd pool ls detail -f json 2>/dev/null)
+  local ALL_POOLS=$(echo "${POOL_JSON}"  | jq --raw-output .[].pool_name)
+  case ${EXP_LEAF} in
+    OSD)
+      local CRUSH_RULE=1
+      ;;
+    HOST)
+      local CRUSH_RULE=0
+      ;;
+    *)
+      >&2 echo "FALSE"
+      ;;
+    esac
+
+  for pool in ${ALL_POOLS}; do
+    ceph "${CLI_OPTS[@]}" osd pool set "${pool}" crush_ruleset "${CRUSH_RULE}" &>/dev/null
+  done
+  echo "SUCCESS"
+}
