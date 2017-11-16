@@ -80,7 +80,7 @@ function start_all_osds {
 
   for disk in ${DISK_LIST}; do
     if is_osd_disk "${disk}"; then
-      activate_osd "${disk}"
+      activate_osd "${disk}" || true
     fi
   done
 }
@@ -100,7 +100,7 @@ function activate_osd {
     return 0
   elif ! is_osd_correct ${disk2act}; then
     log "WARN- The OSD disk ${disk2act} unable to activate for current Ceph cluster."
-    return 0
+    return 2
   fi
 
   local CONT_NAME=$(create_cont_name "${disk2act}" "${OSD_ID}")
@@ -119,6 +119,9 @@ function activate_osd {
   if is_osd_running "${disk2act}"; then
     local CONT_ID=$("${DOCKER_CMD}" ps -q -f LABEL=CEPH=osd -f LABEL=DEV_NAME="${disk2act}")
     log "Success to activate ${disk2act} (${CONT_ID})."
+  else
+    local CONT_ID=$("${DOCKER_CMD}" ps -a -l -q -f LABEL=CEPH=osd -f LABEL=DEV_NAME="${disk2act}")
+    log "WARN- Failed to activate ${disk2act} (${CONT_ID})."
   fi
 }
 
@@ -231,15 +234,14 @@ function prepare_new_osd {
 
   if ! ceph-disk zap "${osd2prep}" &>/dev/null; then
     log "ERROR- Failed to zap disk"
+    return 1
   fi
 
   local CONT_NAME="$(create_cont_name "${osd2prep}")_prepare_$(date +%N)"
-  if "$DOCKER_CMD" run -l CLUSTER="${CLUSTER}" -l CEPH=osd_prepare -l DEV_NAME="${osd2prep}" --name="${CONT_NAME}" \
+  if ! "$DOCKER_CMD" run -l CLUSTER="${CLUSTER}" -l CEPH=osd_prepare -l DEV_NAME="${osd2prep}" --name="${CONT_NAME}" \
     --privileged=true -v /dev/:/dev/ -e CDX_ENV="${CDX_ENV}" -e OSD_DEVICE="${osd2prep}" \
     "${DAEMON_VERSION}" osd_ceph_disk_prepare &>/dev/null; then
-    return 0
-  else
-    return 1
+    return 2
   fi
 }
 
@@ -277,9 +279,7 @@ function is_osd_running {
 
   # check running & exited containers
   local CONT_ID=$("${DOCKER_CMD}" ps -q -f LABEL=CEPH=osd -f LABEL=DEV_NAME="${DEV_NAME}")
-  if [ -n "${CONT_ID}" ]; then
-    return 0
-  else
+  if [ -z "${CONT_ID}" ]; then
     return 1
   fi
 }
@@ -292,16 +292,27 @@ function is_osd_correct {
     # FIXME: disk2verify is a variable ti find ceph data JOURNAL partition.
     disk2verify="$1"
   fi
-
   disk2verify="${disk2verify}1"
-  if ceph-disk --setuser ceph --setgroup disk activate "${disk2verify}" --no-start-daemon &>/dev/null; then
-    OSD_ID=$(df | grep "${disk2verify}" | sed "s/.*${CLUSTER}-//g")
+
+  # check OSD mountable
+  if ! ceph-disk --setuser ceph --setgroup disk activate "${disk2verify}" --no-start-daemon &>/dev/null; then
+    OSD_ID=""
+    umount "${disk2verify}" &>/dev/null || true
+    return 2
+  fi
+
+  # check OSD Key
+  local OSD_PATH=$(df | grep "${disk2verify}" | awk '{print $6}')
+  local TMP_OSD_ID=$(echo "${OSD_PATH}" | sed "s/.*${CLUSTER}-//g")
+  local OSD_KEY_IN_CEPH=$(ceph "${CLI_OPTS[@]}" auth get-key osd."${TMP_OSD_ID}" 2>/dev/null)
+  if [ -z "${OSD_KEY_IN_CEPH}" ]; then
+    return 3
+  elif cat "${OSD_PATH}"/keyring | grep -q "${OSD_KEY_IN_CEPH}"; then
+    OSD_ID="${TMP_OSD_ID}"
     umount "${disk2verify}"
     return 0
   else
-    OSD_ID=""
-    umount "${disk2verify}" &>/dev/null || true
-    return 1
+    return 4
   fi
 }
 
