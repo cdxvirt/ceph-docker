@@ -28,6 +28,19 @@ function cdx_ceph_api {
       # Cache pool commands
       $@
       ;;
+    create_bench_crush|backup_crushmap|recovery_crushmap|create_bench_pool|remove_bench_pool)
+      # For Ceph Auto Bench
+      source cdx/auto-bench.sh
+      local CMD=$1
+      local BENCH_OSD_TYPE=$2
+      local OSD_NUM=$3
+      local STAMP=$4
+      local REPLICA=$5
+      local PG_NUM=$6
+      : "${REPLICA:=3}"
+      : "${PG_NUM:=128}"
+      ${CMD}
+      ;;
     *)
       log "WARN- Wrong options. See function cdx_ceph_api."
       return 2
