@@ -29,6 +29,10 @@ function crush_initialization {
     log "Initialization of crushmap"
     # create a crush rule, chooseleaf as osd.
     ceph "${CLI_OPTS[@]}" osd crush rule create-simple replicated_type_osd default osd firstn
+    # create a crush bucket and two crush rule for ssd pool.
+    ceph "${CLI_OPTS[@]}" osd crush add-bucket SSD root
+    ceph "${CLI_OPTS[@]}" osd crush rule create-simple ssd_replicated_type_osd SSD osd firstn
+    ceph "${CLI_OPTS[@]}" osd crush rule create-simple ssd_replicated_type_host SSD osd firstn
     etcdctl "${ETCDCTL_OPTS[@]}" "${KV_TLS[@]}" set "${CLUSTER_PATH}"/initialization_complete true &>/dev/null
   fi
 

@@ -28,11 +28,11 @@ spec:
           args: ["cdx_mon"]
           env:
             - name: "CEPH_PUBLIC_NETWORK"
-              value: "192.168.32.0/23"
+              value: "192.168.32.0/22"
             - name: "CEPH_CLUSTER_NETWORK"
-              value: "192.168.32.0/23"
+              value: "192.168.32.0/22"
             - name: "K8S_NETWORK"
-              value: "192.168.32.0/23"
+              value: "192.168.32.0/22"
 #            - name: "DEBUG"
 #              value: "verbose"
             - name: "CDX_ENV"

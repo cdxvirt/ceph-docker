@@ -29,6 +29,7 @@
 : "${MAX_OSD:=99}"
 : "${OSD_MEM:=2048M}"
 : "${OSD_CPU_CORE:=2}"
+: "${RESERVED_SLOT:=20}"
 
 # mon
 : "${MON_ROOT_DIR:=/var/lib/ceph/mon/}"

@@ -2,7 +2,8 @@
 # CEPH VERSION: Jewel
 # CEPH VERSION DETAIL: 10.2.x
 
-FROM cdxvirt/ceph-base:base-10.2.10-1
+
+FROM cdxvirt/ceph-base:base-10.2.10-2
 MAINTAINER Sébastien Han "seb@redhat.com"
 
 # Add bootstrap script, ceph defaults key/values for KV store

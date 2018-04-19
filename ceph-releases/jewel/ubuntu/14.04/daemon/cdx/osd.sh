@@ -27,16 +27,15 @@ function check_osd_env {
   fi
 
   # check docker command
-  if ! DOCKER_CMD=$(which docker); then
-    log "ERROR- docker: command not found."
-    exit 1
-  elif ! "${DOCKER_CMD}" -v | grep -wq "version"; then
-    "$DOCKER_CMD" -v
+
+  DOCKER_CMD=docker
+  if ! "${DOCKER_CMD}" -v | grep -wq "version"; then
+    "${DOCKER_CMD}" -v
     exit 1
   fi
 
   # find container image DAEMON_VERSION
-  CDX_OSD_CONT_ID=$(${DOCKER_CMD} ps | awk '/cdx_o/ {print $1}')
+  CDX_OSD_CONT_ID=$(basename "$(cat /proc/1/cpuset)")
   DAEMON_VERSION=$(${DOCKER_CMD} inspect -f '{{.Config.Image}}' ${CDX_OSD_CONT_ID})
 }
 
@@ -109,10 +108,15 @@ function activate_osd {
   fi
 
   # verify and get OSD
-  if ! local OSD_ID=$(verify_osd ${disk2act}); then
-    log "WARN- The OSD disk ${disk2act} unable to activate for current Ceph cluster."
-    return 3
-  fi
+  local OSD_ID=$(verify_osd ${disk2act})
+  case ${OSD_ID} in
+    [[:digit:]]*|OSD)
+      ;;
+    *)
+      log "WARN- The OSD disk ${disk2act} unable to activate for current Ceph cluster."
+      return 3
+      ;;
+  esac
 
   # Remove the old OSD container
   local CONT_NAME=$(create_cont_name "${disk2act}" "${OSD_ID}")
@@ -121,10 +125,17 @@ function activate_osd {
   fi
 
   # Ready to activate
-  "$DOCKER_CMD" run -d -l CLUSTER="${CLUSTER}" -l CEPH=osd -l DEV_NAME="${disk2act}" -l OSD_ID="${OSD_ID}" \
-    --name="${CONT_NAME}" --privileged=true --net=host --pid=host -v /dev:/dev "${OSD_MEM[@]}" "${OSD_CPU_CORE[@]}" \
-    -e CDX_ENV="${CDX_ENV}" -e DEBUG="${DEBUG}" -e OSD_DEVICE="${disk2act}" \
-    "${DAEMON_VERSION}" osd_ceph_disk_activate >/dev/null
+  if is_disk_ssd "${disk2act}"; then
+    "$DOCKER_CMD" run -d -l CLUSTER="${CLUSTER}" -l CEPH=osd -l DEV_NAME="${disk2act}" -l OSD_ID="${OSD_ID}" \
+      --name="${CONT_NAME}" --privileged=true --net=host --pid=host -v /dev:/dev "${OSD_MEM[@]}" "${OSD_CPU_CORE[@]}" \
+      -e CDX_ENV="${CDX_ENV}" -e DEBUG="${DEBUG}" -e OSD_DEVICE="${disk2act}" -e CRUSH_LOCATION=\"root=SSD host=${HOSTNAME}-SSD\" \
+      "${DAEMON_VERSION}" osd_ceph_disk_activate >/dev/null
+  else
+    "$DOCKER_CMD" run -d -l CLUSTER="${CLUSTER}" -l CEPH=osd -l DEV_NAME="${disk2act}" -l OSD_ID="${OSD_ID}" \
+      --name="${CONT_NAME}" --privileged=true --net=host --pid=host -v /dev:/dev "${OSD_MEM[@]}" "${OSD_CPU_CORE[@]}" \
+      -e CDX_ENV="${CDX_ENV}" -e DEBUG="${DEBUG}" -e OSD_DEVICE="${disk2act}" \
+      "${DAEMON_VERSION}" osd_ceph_disk_activate >/dev/null
+  fi
 
   # XXX: check OSD container status continuously
   sleep 3
@@ -317,23 +328,50 @@ function get_avail_disks {
   done
 }
 
+function is_disk_ssd {
+  # Detemine by the value 0:SSD 1:HDD
+  if [ -z "$1" ]; then
+    log "ERROR- function is_disk_ssd need to assign a DISK."
+    exit 1
+  else
+    local DISK=$(echo "$1" | sed 's/\/dev\///g')
+    local DISK_VALUE=$(cat /sys/block/${DISK}/queue/rotational 2>/dev/null || true)
+  fi
+  if [ "${DISK_VALUE}" == "0" ]; then
+    return 0
+  else
+    return 1
+  fi
+}
+
 function get_disks {
   local BLOCKS=$(readlink /sys/class/block/* -e | grep -v "usb" | grep -o "sd[a-z]$")
   [[ -n "${BLOCKS}" ]] || ( echo "" ; return 1 )
-  local SYS_D=""
   local USB_D=$(readlink /sys/class/block/* -e | grep "usb" | grep -o "[sv]d[a-z]$" || true)
+  local RSVD_D=""
+  local SYS_D=""
   local AVAL_D=""
+  if [[ "${RESERVED_SLOT}" == *","* ]]; then
+    RESERVED_SLOT=${RESERVED_SLOT//,/ }
+  fi
+  for slot in ${RESERVED_SLOT}; do
+    local RESERVED_D="${RESERVED_D} $(docker exec toolbox port-mapping.sh -s ${slot} 2>/dev/null || true)"
+  done
   for disk in ${BLOCKS}; do
-    if [ -z "$(lsblk /dev/"${disk}" -no MOUNTPOINT)" ]; then
+    if echo "${RESERVED_D}" | grep -q "${disk}"; then
+      RSVD_D="${RSVD_D} ${disk}"
+    elif [ -z "$(lsblk /dev/"${disk}" -no MOUNTPOINT)" ]; then
       AVAL_D="${AVAL_D} ${disk}"
     else
       SYS_D="${SYS_D} ${disk}"
     fi
   done
   # Remove space in the begining
+
+  RSVD_D=$(echo ${RSVD_D} | sed 's/" /"/')
   AVAL_D=$(echo ${AVAL_D} | sed 's/" /"/')
   SYS_D=$(echo ${SYS_D} | sed 's/" /"/')
-  local J_FORM="{\"systemDisk\":\"${SYS_D}\",\"usbDisk\":\"${USB_D}\",\"avalDisk\":\"${AVAL_D}\"}"
+  local J_FORM="{\"systemDisk\":\"${SYS_D}\",\"usbDisk\":\"${USB_D}\",\"rsvdDisk\":\"${RSVD_D}\",\"avalDisk\":\"${AVAL_D}\"}"
   echo ${J_FORM}
 }
 

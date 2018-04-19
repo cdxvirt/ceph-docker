@@ -24,6 +24,23 @@ function cdx_ceph_api {
       # Commands in this script part 3
       $@
       ;;
+    get_cache_pool|link_cache_tier|unlink_cache_tier)
+      # Cache pool commands
+      $@
+      ;;
+    create_bench_crush|backup_crushmap|recovery_crushmap|create_bench_pool|remove_bench_pool)
+      # For Ceph Auto Bench
+      source cdx/auto-bench.sh
+      local CMD=$1
+      local BENCH_OSD_TYPE=$2
+      local OSD_NUM=$3
+      local STAMP=$4
+      local REPLICA=$5
+      local PG_NUM=$6
+      : "${REPLICA:=3}"
+      : "${PG_NUM:=128}"
+      ${CMD}
+      ;;
     *)
       log "WARN- Wrong options. See function cdx_ceph_api."
       return 2
@@ -156,7 +173,7 @@ function ceph_verify {
 
 function osd_overview {
   if [ ! -e "${ADMIN_KEYRING}" ]; then
-    echo "Ceph Cluster isn't ready. Please try again later."
+    echo "CEPH CLUSTER NOT READY"
     return 1
   fi
   local OSD_NAME_LIST=$(kubectl "${K8S_CERT[@]}" "${K8S_NAMESPACE[@]}" get pod -o custom-columns='NAME:.metadata.name,NODE:.spec.nodeName' --no-headers 2>/dev/null | awk '/ceph-osd-/ {print $2}')
@@ -351,6 +368,87 @@ function set_crush_leaf {
 
   for pool in ${ALL_POOLS}; do
     ceph "${CLI_OPTS[@]}" osd pool set "${pool}" crush_ruleset "${CRUSH_RULE}" &>/dev/null
+  done
+  echo "SUCCESS"
+}
+
+function get_cache_pool {
+  local POOL_DETAIL=$(ceph "${CLI_OPTS[@]}" osd dump -f json | jq ".pools[]")
+  local POOL_NAMES=($(echo "${POOL_DETAIL}" | jq --raw-output ".pool_name"))
+  local USING_CACHE_POOLS=$(ceph "${CLI_OPTS[@]}" osd pool ls detail | awk '/tiers/{print $3}' | sed "s/'//g")
+  local J_FORM=""
+  # List pools who using cache pool
+  for pool in ${USING_CACHE_POOLS}; do
+    local tiers_name=""
+    local tiers_id=""
+    local int=0
+    local J_CONT="{\"poolName\":\"\",\"tiers\":[]}"
+    J_CONT=$(echo ${J_CONT} | jq ".poolName |= .+ \"${pool}\"")
+    # Find tiers
+    tiers_id=$(echo "${POOL_DETAIL}" | jq ". | select(.pool_name == \"${pool}\") | .tiers[]")
+    for t_id in ${tiers_id}; do
+      tiers_name="${tiers_name} $(echo "${POOL_DETAIL}" | jq --raw-output ". | select(.pool == ${t_id}) | .pool_name")"
+    done
+    # Fill content of tiers
+    for pool in ${tiers_name}; do
+      local tier_content=$(echo "${POOL_DETAIL}" | jq ". | select(.pool_name == \"${pool}\") | {\"tierName\":(.pool_name),\"cacheMode\":(.cache_mode),\"targetMaxBytes\":(.target_max_bytes),\"targetMaxObjects\":(.target_max_objects)}")
+      J_CONT=$(echo ${J_CONT} | jq ".tiers[${int}] |= .+ ${tier_content}")
+      let int=int+1
+    done
+    J_FORM="${J_FORM}${J_CONT}"
+  done
+  if [ -z "${J_FORM}" ]; then
+    echo "{}"
+  else
+    echo ${J_FORM}
+  fi
+}
+
+function link_cache_tier {
+  local TARGET_POOL=${1}
+  local CACHE_POOL=${2}
+  if [ -z "${TARGET_POOL}" ]; then
+    echo "Need TARGET_POOL"
+    return 1
+  fi
+  if [ -z "${CACHE_POOL}" ] && ceph "${CLI_OPTS[@]}" osd pool ls | grep -wq "${TARGET_POOL}-cache"; then
+    CACHE_POOL="${TARGET_POOL}-cache"
+  elif [ -z "${CACHE_POOL}" ]; then
+    CACHE_POOL="${TARGET_POOL}-cache"
+    ceph "${CLI_OPTS[@]}" osd pool create "${CACHE_POOL}" 128 &>/dev/null
+  elif [ -n "${CACHE_POOL}" ] && ! ceph "${CLI_OPTS[@]}" osd pool ls | grep -wq "${CACHE_POOL}"; then
+    ceph "${CLI_OPTS[@]}" osd pool create "${CACHE_POOL}" 128 &>/dev/null
+  fi
+  ceph "${CLI_OPTS[@]}" osd pool set "${CACHE_POOL}" crush_ruleset 2 &>/dev/null
+  ceph "${CLI_OPTS[@]}" osd pool set "${CACHE_POOL}" size 2 &>/dev/null
+  ceph "${CLI_OPTS[@]}" osd tier add "${TARGET_POOL}" "${CACHE_POOL}" >/dev/null
+  ceph "${CLI_OPTS[@]}" osd tier cache-mode "${CACHE_POOL}" writeback &>/dev/null
+  ceph "${CLI_OPTS[@]}" osd tier set-overlay "${TARGET_POOL}" "${CACHE_POOL}" >/dev/null
+  ceph "${CLI_OPTS[@]}" osd pool set "${CACHE_POOL}" hit_set_type bloom &>/dev/null
+  ceph "${CLI_OPTS[@]}" osd pool set "${CACHE_POOL}" target_max_bytes 1099511627776 &>/dev/null
+  echo "SUCCESS"
+}
+
+function unlink_cache_tier {
+  local TARGET_POOL=${1}
+  local CACHE_POOL=${2}
+  if [ -z "${TARGET_POOL}" ]; then
+    echo "Need TARGET_POOL"
+    return 1
+  fi
+  local TIERS=$(get_cache_pool | jq --raw-output ".| select(.poolName == \"${TARGET_POOL}\") | .tiers[].tierName")
+  if [ -z "${CACHE_POOL}" ]; then
+    CACHE_POOL=(${TIERS})
+  elif echo "${TIERS}" | grep -qw "${CACHE_POOL}"; then
+    CACHE_POOL=(${CACHE_POOL//,/ })
+  else
+    echo "${CACHE_POOL} is not a tier of ${TARGET_POOL}."
+    exit 1
+  fi
+  for pool in ${CACHE_POOL[@]}; do
+    rados "${CLI_OPTS[@]}" -p "${pool}" cache-flush-evict-all &>/dev/null
+    ceph "${CLI_OPTS[@]}" osd tier remove-overlay "${TARGET_POOL}" >/dev/null
+    ceph "${CLI_OPTS[@]}" osd tier remove ${TARGET_POOL} "${pool}" >/dev/null
   done
   echo "SUCCESS"
 }

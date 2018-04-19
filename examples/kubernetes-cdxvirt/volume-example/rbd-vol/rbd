@@ -6,6 +6,45 @@ if ! DOCKER_CMD=$(which docker 2>/dev/null); then
   exit 1
 fi
 
-LD_LIBRARY_PATH=/lib:/host/lib "${DOCKER_CMD}" run --rm --privileged=true --net=host --pid=host \
+function remove_k8s_rbd_lock {
+  # Before map, check image is mounting or not
+  if [ -n "${RBD_IMAGE}" ]; then
+    RBD_STATUS=$(LD_LIBRARY_PATH=/usr/lib:/host/lib "${DOCKER_CMD}" run --rm --privileged=true \
+    --net=host --pid=host -v /dev/:/dev/ -v /etc/ceph:/etc/ceph -v /lib/modules/:/lib/modules/ \
+    -e CDX_ENV=true -e KV_TYPE=etcd -e KV_PORT=2379 "${CEPH_IMG}" admin rbd status ${RBD_IMAGE} ${ELSE_CMD})
+  else
+    return 0
+  fi
+
+  # If image does not map, check lock.
+  if echo "${RBD_STATUS}" | grep -q "cookie"; then
+    return 0
+  else
+    RBD_LOCK=$(LD_LIBRARY_PATH=/usr/lib:/host/lib "${DOCKER_CMD}" run --rm --privileged=true \
+    --net=host --pid=host -v /dev/:/dev/ -v /etc/ceph:/etc/ceph -v /lib/modules/:/lib/modules/ \
+    -e CDX_ENV=true -e KV_TYPE=etcd -e KV_PORT=2379 "${CEPH_IMG}" admin rbd lock list ${RBD_IMAGE} ${ELSE_CMD} \
+    | grep "kubelet_lock_magic_" | awk '{print$2,$1}')
+  fi
+
+  # If the lock name isn't itself, remove it.
+  if echo "${RBD_LOCK}" | grep -q "kubelet_lock_magic_$(hostname)"; then
+    return 0
+  else
+    LD_LIBRARY_PATH=/usr/lib:/host/lib "${DOCKER_CMD}" run --rm --privileged=true --net=host --pid=host \
+    -v /dev/:/dev/ -v /etc/ceph:/etc/ceph -v /lib/modules/:/lib/modules/ -e CDX_ENV=true -e KV_TYPE=etcd \
+    -e KV_PORT=2379 "${CEPH_IMG}" admin rbd lock remove ${RBD_IMAGE} ${RBD_LOCK} ${ELSE_CMD}
+  fi
+}
+
+# MAIN
+RBD_CMD="$@"
+if [ $1 == "map" ]; then
+  RBD_IMAGE=$2
+  shift 2
+  ELSE_CMD=$@
+  remove_k8s_rbd_lock
+fi
+
+LD_LIBRARY_PATH=/usr/lib:/host/lib "${DOCKER_CMD}" run --rm --privileged=true --net=host --pid=host \
 -v /dev/:/dev/ -v /etc/ceph:/etc/ceph -v /lib/modules/:/lib/modules/ \
--e CDX_ENV=true -e KV_TYPE=etcd -e KV_PORT=2379 "${CEPH_IMG}" admin rbd "$@"
+-e CDX_ENV=true -e KV_TYPE=etcd -e KV_PORT=2379 "${CEPH_IMG}" admin rbd "${RBD_CMD}"

@@ -25,13 +25,13 @@ spec:
       volumes:
         - name: docker
           hostPath:
-            path: /bin/docker
+            path: /run/torcx/unpack/docker/bin/docker
         - name: docker-sock
           hostPath:
             path: /var/run/docker.sock
         - name: hostlib
           hostPath:
-            path: /usr/lib64
+            path: /run/torcx/unpack/docker/lib
         - name: dev
           hostPath:
             path: /dev/

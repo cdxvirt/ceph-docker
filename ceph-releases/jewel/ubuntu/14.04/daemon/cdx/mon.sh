@@ -85,9 +85,44 @@ function update_etcd_monmap {
   fi
 }
 
+function recovery_mon {
+  verify_mon_folder
+
+  # remove all monmap list then add itself
+  log "Remove old monitor info on the monmap"
+  ceph-mon -i ${MON_NAME} --extract-monmap /tmp/monmap &>/dev/null
+  local MONMAP_LIST=$(monmaptool -p /tmp/monmap | awk '/mon\./ { sub ("mon.", "", $3); print $3}')
+  for del_mon in ${MONMAP_LIST}; do
+    monmaptool --rm $del_mon /tmp/monmap &>/dev/null
+  done
+
+  # add itself into monmap
+  log "Update monitor info in the monmap"
+  monmaptool --add ${MON_NAME} ${MON_IP}:6789 /tmp/monmap &>/dev/null
+  ceph-mon -i ${MON_NAME} --inject-monmap /tmp/monmap &>/dev/null
+  echo ""
+  monmaptool -p /tmp/monmap
+
+  # update ETCD (include monmap & mon_host)
+  if uuencode /tmp/monmap - | etcdctl "${ETCDCTL_OPTS[@]}" "${KV_TLS[@]}" set "${CLUSTER_PATH}"/monmap &>/dev/null; then
+    etcdctl "${ETCDCTL_OPTS[@]}" "${KV_TLS[@]}" rm "${CLUSTER_PATH}"/mon_host --recursive &>/dev/null || true
+    echo ""
+    log "Success & Exit"
+  else
+    log "ERROR- Fail to upload monmap to ETCD"
+    exit 1
+  fi
+}
+
+
 ## MAIN
 function cdx_mon {
   get_mon_ip_from_public
+
+  if [ "${MON_RCY}" == "true" ]; then
+    recovery_mon
+    exit 0
+  fi
 
   if [ "${KV_TYPE}" == "etcd" ]; then
     populate_etcd
