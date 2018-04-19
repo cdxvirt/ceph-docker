@@ -12,7 +12,7 @@ spec:
         pod.beta.kubernetes.io/init-containers: '[
             {
                 "name": "check-monitor-running",
-                "image": "cdxvirt/ceph-daemon:daemon-10.2.10-3",
+                "image": "cdxvirt/ceph-daemon:daemon-10.2.10-4",
                 "imagePullPolicy": "IfNotPresent",
                 "command": ["/bin/bash","-c"],
                 "args": ["source /cdx/cdx-env.sh && curl ceph-mon.ceph:6789"]
@@ -43,14 +43,14 @@ spec:
             path: /etc/localtime
       containers:
         - name: ceph-osd-pod
-          image: cdxvirt/ceph-daemon:daemon-10.2.10-3
+          image: cdxvirt/ceph-daemon:daemon-10.2.10-4
           imagePullPolicy: IfNotPresent
           securityContext:
             privileged: true
           args: ["cdx_osd"]
           env:
             - name: "DAEMON_VERSION"
-              value: "cdxvirt/ceph-daemon:daemon-10.2.10-3"
+              value: "cdxvirt/ceph-daemon:daemon-10.2.10-4"
 #            - name: "DEBUG"
 #              value: "verbose"
             - name: "CDX_ENV"
