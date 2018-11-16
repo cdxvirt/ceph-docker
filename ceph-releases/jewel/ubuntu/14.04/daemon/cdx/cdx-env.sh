@@ -25,6 +25,7 @@
 # osd
 : "${CRUSH_TYPE:=space}"
 : "${PGs_PER_OSD:=32}"
+: "${RBD_PG_NUM:=128}"
 : "${OSD_INIT_MODE:=minimal}"
 : "${MAX_OSD:=99}"
 : "${OSD_MEM:=2048M}"

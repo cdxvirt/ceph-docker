@@ -83,7 +83,7 @@ function auto_change_crush {
 
   case "${CRUSH_TYPE}" in
     none)
-      log_success "Disable changing crush rule automatically."
+      log "Disable changing crush rule automatically."
       ;;
     space)
       crush_type_space
@@ -91,10 +91,13 @@ function auto_change_crush {
     safety)
       crush_type_safety
       ;;
+    prod)
+      crush_type_prod
+      ;;
     *)
       log "WARN- Definition of CRUSH_TYPE error. Do nothing."
       log "WARN- Disable changing crush rule automatically."
-      log "WARN- CRUSH_TYPE: [ none | space | safety ]."
+      log "WARN- CRUSH_TYPE: [ none | space | safety | prod ]."
       ;;
   esac
 
@@ -148,6 +151,28 @@ function crush_type_safety {
   fi
   local PG_NUM=$(expr "${PGs_PER_OSD}" '*' "${multiple}")
   set_pg_num "${RBD_POOL}" "${PG_NUM}"
+}
+
+# Only Change crush leaf. Set RBD PG as a fixed number. Max replications is 3.
+function crush_type_prod {
+  # RCs not greater than 3
+  if [ "${NODEs}" -eq "0" ]; then
+    log "WARN- No Storage Node, do nothing with changing crush_type"
+    return 0
+  elif [ "${NODEs}" -lt "3" ]; then
+    set_pool_size "${NODEs}" "${CURRENT_POOLS}"
+    set_crush_ruleset osd "${CURRENT_POOLS}"
+  else
+    set_pool_size 3 "${CURRENT_POOLS}"
+    set_crush_ruleset host "${CURRENT_POOLS}"
+  fi
+
+  # Read $RBD_PG_NUM from env variable.
+  if [ -n "${RBD_PG_NUM}" ]; then
+    set_pg_num "${RBD_POOL}" "${RBD_PG_NUM}"
+  else
+    set_pg_num "${RBD_POOL}" 128
+  fi
 }
 
 function set_crush_ruleset {
